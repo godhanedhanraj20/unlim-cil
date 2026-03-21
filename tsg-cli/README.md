@@ -15,30 +15,43 @@ Ready to jump in? Here are the quickest steps to get started:
 
 ---
 
-## ✨ Features (Full List)
+## ✨ Features
 
 - **Login securely:** Uses your Telegram account (supports OTP and optional 2FA passwords).
 - **Upload files:** Send any file up to 2GB straight to your Saved Messages.
-- **List your files:** View a clean table of all the files you've stored.
+- **List your files:** View a clean table of all the files you've stored with metadata (ID, Name, Size, Date, Tags).
 - **Download files:** Easily retrieve your files by their ID.
 - **Delete files:** Remove files from your storage forever.
-- **Search files:** Find files quickly by keyword.
+- **Search files:** Find files quickly by their name.
 - **Filter by type:** Only show videos, images, documents, or audio (`--type`).
-- **Sort results:** Order your files by date, size, or name (`--sort`).
-- **Limit results:** Control how many files you want to see (`--limit`).
-- **Upload progress:** Watch real-time upload progress with transfer speeds (MB/s).
-- **Download progress:** Watch real-time download progress with transfer speeds (MB/s).
+- **Filter by tags:** Quickly pull up files linked to a specific tag (`--tag`).
+- **Sorting support:** Order your files by date, size, or name (`--sort`).
+- **Pagination support:** Navigate large collections easily (`--page`).
+- **Tagging system:** Add, remove, and list tags on your files.
+- **Virtual folders:** Treat tags like folders (e.g., `list --tag pokemon`).
+- **Virtual rename system:** Override file names locally without re-uploading.
+- **Real-time progress:** Watch upload and download progress with transfer speeds (MB/s).
+
+---
+
+## 🚀 New in Phase 3
+
+We've supercharged TSG-CLI to be a complete file management system:
+- **Tags:** Organize your files like folders.
+- **Virtual folders:** Quickly pull up all files in a "folder" using `list --tag <name>`.
+- **Rename:** Override file names locally without altering the original upload.
+- **Pagination:** Easily navigate large collections of files without overwhelming your screen.
 
 ---
 
 ## 🧠 How It Works
 
-It is incredibly simple:
+It is incredibly simple and entirely local:
 - Your files are uploaded securely and directly to your Telegram **"Saved Messages"** chat.
 - Each file you upload simply becomes one Telegram message.
 - The CLI uses the unique Telegram message ID as the "File ID".
-
-This means you can easily see them on your phone, tablet, or web browser simply by opening the Telegram app and looking at your Saved Messages!
+- Your custom **Tags** and **Virtual Names** are stored strictly on your computer in a local file (`~/.tsg-cli/metadata.json`).
+- **No database is used!** Everything is just your local computer talking directly to Telegram.
 
 ---
 
@@ -118,17 +131,32 @@ python main.py upload <file>
 List the files you have stored.
 ```bash
 python main.py list
-python main.py list --sort date
-python main.py list --sort size
+python main.py list --page 2
+python main.py list --tag pokemon
 ```
 
 ### 🔍 search
-Find specific files by typing a keyword.
+Find specific files by typing a keyword or tag.
 ```bash
-python main.py search <query>
-python main.py search <query> --type video
-python main.py search <query> --sort size
-python main.py search <query> --limit 20
+python main.py search naruto
+python main.py search --tag anime
+python main.py search naruto --tag anime
+python main.py search naruto --page 2
+```
+
+### 🏷️ tagging
+Organize your files with tags.
+```bash
+python main.py tag <file_id> add <tag>
+python main.py tag <file_id> remove <tag>
+python main.py tag <file_id> list
+```
+
+### ✏️ rename
+Give a file a virtual, custom name locally.
+```bash
+python main.py rename <file_id> "New Name"
+python main.py rename <file_id>  # Leaves it blank to reset to original
 ```
 
 ### 📥 download
@@ -166,11 +194,41 @@ python main.py upload movie.mp4
 
 ---
 
+## 📸 Example Output
+
+Wondering what it looks like? Here is an example of listing files:
+
+```
+Fetching files...
+                             Stored Files
+┏━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓
+┃    ID ┃ Name             ┃    Size ┃ Date                ┃   Tags ┃
+┡━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━┩
+│ 12345 │ vac_photo.jpg    │ 2.45 MB │ 2024-05-12 14:32:00 │ travel │
+│ 12344 │ budget.pdf       │ 0.85 MB │ 2024-05-10 09:15:22 │   work │
+│ 12343 │ movie.mp4        │ 1.20 GB │ 2024-05-09 20:45:11 │      - │
+└───────┴──────────────────┴─────────┴─────────────────────┴────────┘
+```
+
+And here is what happens when you upload:
+
+```
+Uploading my_file.txt...
+Uploading... 100.00% (12.00 KB/12.00 KB) | 4.30 MB/s
+Upload successful
+Message ID: 12346
+File name: my_file.txt
+File size: 12.00 KB
+```
+
+---
+
 ## ⚠️ Limitations
 
-- **Max file size:** Telegram allows a maximum of **2GB** per file.
-- **No folders:** Your files are stored in a flat list without a folder structure.
-- **Dependencies:** The tool depends on the Telegram API to function.
+- **Max file size:** Telegram allows a maximum of **~2GB** per file.
+- **No real folders:** Your files are stored in a flat list (you use tags to simulate folders).
+- **Dependencies:** The tool requires the Telegram API to function (`api_id` and `api_hash`).
+- **Availability:** Dependent on Telegram's network availability.
 - **Internet:** You must be connected to the internet for the tool to work.
 
 ---
