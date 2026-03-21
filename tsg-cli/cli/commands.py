@@ -50,7 +50,8 @@ def upload(file_path: str = typer.Argument(..., help="Path to the file to upload
 @app.command(name="list")
 def list_cmd(
     limit: int = typer.Option(50, "--limit", "-l", help="Number of files to list (max 200)"),
-    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name")
+    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
+    tag: str = typer.Option(None, "--tag", help="Filter files by tag (virtual folder)")
 ):
     """List files stored in Telegram Saved Messages."""
     async def _list():
@@ -60,13 +61,14 @@ def list_cmd(
                 raise TSGError("Invalid sort. Use: date, size, name")
 
             console.print("[cyan]Fetching files...[/cyan]")
-            files = await list_files(client, limit, sort_by=sort)
+            files = await list_files(client, limit, sort_by=sort, tag=tag)
 
             if not files:
                 console.print("[yellow]No files found in Saved Messages.[/yellow]")
                 return
 
-            table = Table(title="Stored Files")
+            title = f"Files (Folder: {tag})" if tag else "Stored Files"
+            table = Table(title=title)
             table.add_column("ID", justify="left", style="cyan", no_wrap=True)
             table.add_column("Name", style="magenta")
             table.add_column("Size", justify="right", style="green")

@@ -50,7 +50,7 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
             raise e
         raise TSGError(f"Upload failed: {str(e)}")
 
-async def list_files(client: Client, limit: int = 50, sort_by: str = None) -> List[Dict[str, Any]]:
+async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: str = None) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
@@ -61,6 +61,12 @@ async def list_files(client: Client, limit: int = 50, sort_by: str = None) -> Li
         async for message in client.get_chat_history("me"):
             metadata = extract_message_metadata(message)
             if metadata:
+                # Tag-based filtering (virtual folders)
+                if tag:
+                    tags_value = metadata.get("tags", "")
+                    if tag.lower() not in tags_value.lower():
+                        continue
+
                 files.append(metadata)
                 if len(files) >= limit:
                     break
