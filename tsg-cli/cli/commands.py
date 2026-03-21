@@ -101,21 +101,23 @@ def download(
 
 @app.command()
 def search(
-    query: str = typer.Argument(..., help="Keyword to search for in file names"),
+    query: str = typer.Argument(None, help="Keyword to search for in file names"),
     limit: int = typer.Option(50, "--limit", "-l", help="Number of files to return (max 200)"),
     file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type (video, image, document, audio)"),
-    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name")
+    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
+    tag: str = typer.Option(None, "--tag", help="Filter by tag")
 ):
-    """Search for files by name and optional type."""
+    """Search for files by name and optional type or tag."""
     async def _search():
         client = await get_authenticated_client()
         try:
+            if not query and not tag:
+                raise TSGError("Provide a search query or --tag")
+
             if sort and sort not in ["date", "size", "name"]:
                 raise TSGError("Invalid sort. Use: date, size, name")
 
-            trimmed_query = query.strip()
-            if not trimmed_query:
-                raise TSGError("Search query cannot be empty.")
+            trimmed_query = query.strip() if query else ""
 
             if file_type:
                 ft = file_type.lower()
@@ -124,14 +126,26 @@ def search(
             else:
                 ft = None
 
-            console.print(f"[cyan]Searching files for '{trimmed_query}'...[/cyan]")
-            files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort)
+            msg_parts = []
+            if trimmed_query:
+                msg_parts.append(f"query '{trimmed_query}'")
+            if tag:
+                msg_parts.append(f"tag '{tag}'")
+            console.print(f"[cyan]Searching files for {' and '.join(msg_parts)}...[/cyan]")
+
+            files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort, tag=tag)
 
             if not files:
                 console.print("[yellow]No matching files found.[/yellow]")
                 return
 
-            title = f"Search Results: '{trimmed_query}'"
+            if trimmed_query and tag:
+                title = "Search Results (Query + Tag)"
+            elif tag and not trimmed_query:
+                title = f"Files (Tag: {tag})"
+            else:
+                title = f"Search Results: '{trimmed_query}'"
+
             if ft:
                 title += f" (Type: {ft})"
 

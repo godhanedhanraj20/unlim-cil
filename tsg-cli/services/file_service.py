@@ -152,14 +152,12 @@ async def delete_file(client: Client, file_id: int):
     except Exception as e:
         raise Exception("Delete failed. Please try again.")
 
-async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None, sort_by: str = None) -> List[Dict[str, Any]]:
+async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None, sort_by: str = None, tag: str = None) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
 
-    query = query.strip().lower()
-    if not query:
-        raise TSGError("Search query cannot be empty.")
+    query = query.strip() if query else ""
 
     files = []
     try:
@@ -181,11 +179,20 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
 
             metadata = extract_message_metadata(message)
             if metadata:
-                # Filter by filename matching query
-                if query in metadata['name'].lower():
-                    files.append(metadata)
-                    if len(files) >= limit:
-                        break
+                # Name-based filtering
+                if query:
+                    if query.lower() not in metadata["name"].lower():
+                        continue
+
+                # Tag-based filtering
+                if tag:
+                    tags_value = metadata.get("tags", "")
+                    if tag.lower() not in tags_value.lower():
+                        continue
+
+                files.append(metadata)
+                if len(files) >= limit:
+                    break
     except Exception as e:
         raise Exception("Failed to search files. Please try again.")
 
