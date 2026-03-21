@@ -48,3 +48,19 @@ def get_tags(file_id: str) -> list:
     if file_id in data:
         return data[file_id].get("tags", [])
     return []
+
+def set_custom_name(file_id: str, name: str):
+    data = load_metadata()
+    entry = data.setdefault(file_id, {})
+    entry["custom_name"] = name
+    save_metadata(data)
+
+def get_custom_name(file_id: str):
+    data = load_metadata()
+    return data.get(file_id, {}).get("custom_name")
+
+def remove_custom_name(file_id: str):
+    data = load_metadata()
+    if file_id in data and "custom_name" in data[file_id]:
+        del data[file_id]["custom_name"]
+        save_metadata(data)

@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from pyrogram import Client
 from utils.parser import extract_message_metadata, format_size
 from utils.errors import TSGError
+from utils.metadata_manager import get_custom_name
 
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 # 2GB
 
@@ -99,7 +100,13 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
         if not metadata:
             raise TSGError(f"Message ID {file_id} does not contain valid media.")
 
-        file_path = os.path.join(output_directory, metadata['name'])
+        custom_name = get_custom_name(str(file_id))
+        if custom_name:
+            final_name = custom_name
+        else:
+            final_name = getattr(message.document or message.video or message.audio or message.photo, "file_name", metadata['name'])
+
+        file_path = os.path.join(output_directory, final_name)
 
         # Start time is a list so we can mutate it in the closure during retries if needed,
         # or we just re-assign start_time before retry. Using a list is safer for closure scoping in python.

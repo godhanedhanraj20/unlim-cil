@@ -1,4 +1,4 @@
-from utils.metadata_manager import get_tags
+from utils.metadata_manager import get_tags, get_custom_name
 
 def format_size(size_bytes: int) -> str:
     if size_bytes == 0:
@@ -44,15 +44,19 @@ def extract_message_metadata(message):
         return None
 
     # Get file name
-    file_name = getattr(media, "file_name", None)
-    if not file_name:
-        file_name = f"file_{message.id}"
-        if media_type == "photo":
-            file_name += ".jpg"
-        elif media_type == "video":
-            file_name += ".mp4"
-        elif media_type == "audio":
-            file_name += ".mp3"
+    custom_name = get_custom_name(str(message.id))
+    if custom_name:
+        file_name = custom_name
+    else:
+        file_name = getattr(media, "file_name", None)
+        if not file_name:
+            file_name = f"file_{message.id}"
+            if media_type == "photo":
+                file_name += ".jpg"
+            elif media_type == "video":
+                file_name += ".mp4"
+            elif media_type == "audio":
+                file_name += ".mp3"
 
     # Get file size
     file_size = getattr(media, "file_size", 0)

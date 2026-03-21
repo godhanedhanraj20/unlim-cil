@@ -7,7 +7,7 @@ import os
 from services.auth import interactive_login, get_authenticated_client
 from services.file_service import upload_file, list_files, download_file, delete_file, search_files
 from utils.errors import TSGError
-from utils.metadata_manager import add_tag, remove_tag, get_tags
+from utils.metadata_manager import add_tag, remove_tag, get_tags, set_custom_name, remove_custom_name
 
 app = typer.Typer(help="TSG-CLI: Telegram Storage CLI")
 console = Console()
@@ -193,6 +193,29 @@ def tag(
                 console.print("[yellow]No tags found.[/yellow]")
         else:
             raise TSGError("Invalid action. Use: add, remove, list")
+    except TSGError as e:
+        console.print(f"[red]{str(e)}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print("[red]Unexpected error occurred. Please try again.[/red]")
+        raise typer.Exit(1)
+
+@app.command()
+def rename(
+    file_id: str = typer.Argument(..., help="ID of the file"),
+    name: str = typer.Argument(None, help="New custom name (leave empty to reset)")
+):
+    """Rename a file (virtual name)"""
+    try:
+        if name is not None and not name.strip():
+            raise TSGError("Name cannot be empty")
+
+        if name:
+            set_custom_name(file_id, name)
+            console.print(f"[green]Name updated: {name}[/green]")
+        else:
+            remove_custom_name(file_id)
+            console.print("[green]Custom name removed[/green]")
     except TSGError as e:
         console.print(f"[red]{str(e)}[/red]")
         raise typer.Exit(1)
