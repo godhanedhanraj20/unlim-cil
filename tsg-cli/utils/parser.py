@@ -1,3 +1,5 @@
+from utils.metadata_manager import get_tags
+
 def format_size(size_bytes: int) -> str:
     if size_bytes == 0:
         return "0B"
@@ -59,10 +61,15 @@ def extract_message_metadata(message):
     # Get date
     date = message.date.strftime("%Y-%m-%d %H:%M:%S") if getattr(message, "date", None) else "Unknown"
 
+    # Get tags
+    tags = get_tags(str(message.id))
+    formatted_tags = ", ".join(tags) if tags else "-"
+
     return {
         "id": message.id,
         "name": file_name,
         "size": formatted_size,
         "date": date,
+        "tags": formatted_tags,
         "raw_size": file_size
     }

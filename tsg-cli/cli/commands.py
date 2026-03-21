@@ -71,9 +71,10 @@ def list_cmd(
             table.add_column("Name", style="magenta")
             table.add_column("Size", justify="right", style="green")
             table.add_column("Date", style="blue")
+            table.add_column("Tags", style="yellow")
 
             for f in files:
-                table.add_row(str(f["id"]), f["name"], f["size"], f["date"])
+                table.add_row(str(f["id"]), f["name"], f["size"], f["date"], f["tags"])
 
             console.print(table)
         finally:
@@ -139,9 +140,10 @@ def search(
             table.add_column("Name", style="magenta")
             table.add_column("Size", justify="right", style="green")
             table.add_column("Date", style="blue")
+            table.add_column("Tags", style="yellow")
 
             for f in files:
-                table.add_row(str(f["id"]), f["name"], f["size"], f["date"])
+                table.add_row(str(f["id"]), f["name"], f["size"], f["date"], f["tags"])
 
             console.print(table)
         finally:
