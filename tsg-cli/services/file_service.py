@@ -16,16 +16,26 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
     if file_size > MAX_FILE_SIZE:
         raise TSGError("File exceeds 2GB limit. Cannot upload.")
 
+    async def progress(current, total):
+        if total > 0:
+            percent = current * 100 / total
+            print(f"\rUploading... {percent:.2f}% ({current}/{total})", end="", flush=True)
+        else:
+            print(f"\rUploading... ({current} bytes)", end="", flush=True)
+
     try:
         if not client.is_connected:
             await client.connect()
 
-        message = await client.send_document("me", document=abs_path)
+        message = await client.send_document("me", document=abs_path, progress=progress)
+        print() # Move to next line after upload finishes
+
         metadata = extract_message_metadata(message)
         if not metadata:
             raise TSGError("Failed to extract metadata after upload.")
         return metadata
     except Exception as e:
+        print() # Ensure the next line is clean if it fails mid-upload
         if isinstance(e, TSGError):
             raise e
         raise TSGError(f"Upload failed: {str(e)}")
