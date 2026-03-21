@@ -40,7 +40,7 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
             raise e
         raise TSGError(f"Upload failed: {str(e)}")
 
-async def list_files(client: Client, limit: int = 50) -> List[Dict[str, Any]]:
+async def list_files(client: Client, limit: int = 50, sort_by: str = None) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
@@ -56,6 +56,13 @@ async def list_files(client: Client, limit: int = 50) -> List[Dict[str, Any]]:
                     break
     except Exception as e:
         raise Exception("Failed to list files. Please try again.")
+
+    if sort_by == "date":
+        files.sort(key=lambda x: x["date"], reverse=True)
+    elif sort_by == "size":
+        files.sort(key=lambda x: x["raw_size"], reverse=True)
+    elif sort_by == "name":
+        files.sort(key=lambda x: x["name"].lower())
 
     return files
 
@@ -123,7 +130,7 @@ async def delete_file(client: Client, file_id: int):
     except Exception as e:
         raise Exception("Delete failed. Please try again.")
 
-async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None) -> List[Dict[str, Any]]:
+async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None, sort_by: str = None) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
@@ -159,5 +166,12 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
                         break
     except Exception as e:
         raise Exception("Failed to search files. Please try again.")
+
+    if sort_by == "date":
+        files.sort(key=lambda x: x["date"], reverse=True)
+    elif sort_by == "size":
+        files.sort(key=lambda x: x["raw_size"], reverse=True)
+    elif sort_by == "name":
+        files.sort(key=lambda x: x["name"].lower())
 
     return files

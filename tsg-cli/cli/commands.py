@@ -47,13 +47,19 @@ def upload(file_path: str = typer.Argument(..., help="Path to the file to upload
     run_async(_upload())
 
 @app.command(name="list")
-def list_cmd(limit: int = typer.Option(50, "--limit", "-l", help="Number of files to list (max 200)")):
+def list_cmd(
+    limit: int = typer.Option(50, "--limit", "-l", help="Number of files to list (max 200)"),
+    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name")
+):
     """List files stored in Telegram Saved Messages."""
     async def _list():
         client = await get_authenticated_client()
         try:
+            if sort and sort not in ["date", "size", "name"]:
+                raise TSGError("Invalid sort. Use: date, size, name")
+
             console.print("[cyan]Fetching files...[/cyan]")
-            files = await list_files(client, limit)
+            files = await list_files(client, limit, sort_by=sort)
 
             if not files:
                 console.print("[yellow]No files found in Saved Messages.[/yellow]")
@@ -95,12 +101,16 @@ def download(
 def search(
     query: str = typer.Argument(..., help="Keyword to search for in file names"),
     limit: int = typer.Option(50, "--limit", "-l", help="Number of files to return (max 200)"),
-    file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type (video, image, document, audio)")
+    file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type (video, image, document, audio)"),
+    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name")
 ):
     """Search for files by name and optional type."""
     async def _search():
         client = await get_authenticated_client()
         try:
+            if sort and sort not in ["date", "size", "name"]:
+                raise TSGError("Invalid sort. Use: date, size, name")
+
             trimmed_query = query.strip()
             if not trimmed_query:
                 raise TSGError("Search query cannot be empty.")
@@ -113,7 +123,7 @@ def search(
                 ft = None
 
             console.print(f"[cyan]Searching files for '{trimmed_query}'...[/cyan]")
-            files = await search_files(client, trimmed_query, limit, file_type=ft)
+            files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort)
 
             if not files:
                 console.print("[yellow]No matching files found.[/yellow]")
