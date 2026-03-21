@@ -51,10 +51,13 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
             raise e
         raise TSGError(f"Upload failed: {str(e)}")
 
-async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: str = None) -> List[Dict[str, Any]]:
+async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: str = None, page: int = 1) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
+
+    start = (page - 1) * limit
+    end = start + limit
 
     files = []
     try:
@@ -69,7 +72,7 @@ async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: 
                         continue
 
                 files.append(metadata)
-                if len(files) >= limit:
+                if len(files) >= end:
                     break
     except Exception as e:
         raise Exception("Failed to list files. Please try again.")
@@ -81,7 +84,8 @@ async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: 
     elif sort_by == "name":
         files.sort(key=lambda x: x["name"].lower())
 
-    return files
+    paginated_items = files[start:end]
+    return paginated_items
 
 async def download_file(client: Client, file_id: int, output_directory: str) -> str:
     if not os.path.exists(output_directory):
@@ -165,10 +169,13 @@ async def delete_file(client: Client, file_id: int):
     except Exception as e:
         raise Exception("Delete failed. Please try again.")
 
-async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None, sort_by: str = None, tag: str = None) -> List[Dict[str, Any]]:
+async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None, sort_by: str = None, tag: str = None, page: int = 1) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
+
+    start = (page - 1) * limit
+    end = start + limit
 
     query = query.strip() if query else ""
 
@@ -204,7 +211,7 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
                         continue
 
                 files.append(metadata)
-                if len(files) >= limit:
+                if len(files) >= end:
                     break
     except Exception as e:
         raise Exception("Failed to search files. Please try again.")
@@ -216,4 +223,5 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
     elif sort_by == "name":
         files.sort(key=lambda x: x["name"].lower())
 
-    return files
+    paginated_items = files[start:end]
+    return paginated_items

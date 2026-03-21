@@ -51,23 +51,30 @@ def upload(file_path: str = typer.Argument(..., help="Path to the file to upload
 def list_cmd(
     limit: int = typer.Option(50, "--limit", "-l", help="Number of files to list (max 200)"),
     sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
-    tag: str = typer.Option(None, "--tag", help="Filter files by tag (virtual folder)")
+    tag: str = typer.Option(None, "--tag", help="Filter files by tag (virtual folder)"),
+    page: int = typer.Option(1, "--page", help="Page number")
 ):
     """List files stored in Telegram Saved Messages."""
     async def _list():
         client = await get_authenticated_client()
         try:
+            if page < 1:
+                raise TSGError("Page must be >= 1")
+
             if sort and sort not in ["date", "size", "name"]:
                 raise TSGError("Invalid sort. Use: date, size, name")
 
             console.print("[cyan]Fetching files...[/cyan]")
-            files = await list_files(client, limit, sort_by=sort, tag=tag)
+            files = await list_files(client, limit, sort_by=sort, tag=tag, page=page)
 
             if not files:
                 console.print("[yellow]No files found in Saved Messages.[/yellow]")
                 return
 
-            title = f"Files (Folder: {tag})" if tag else "Stored Files"
+            if tag:
+                title = f"Files (Folder: {tag}) - Page {page}"
+            else:
+                title = f"Stored Files (Page {page})"
             table = Table(title=title)
             table.add_column("ID", justify="left", style="cyan", no_wrap=True)
             table.add_column("Name", style="magenta")
@@ -107,12 +114,16 @@ def search(
     limit: int = typer.Option(50, "--limit", "-l", help="Number of files to return (max 200)"),
     file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type (video, image, document, audio)"),
     sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
-    tag: str = typer.Option(None, "--tag", help="Filter by tag")
+    tag: str = typer.Option(None, "--tag", help="Filter by tag"),
+    page: int = typer.Option(1, "--page", help="Page number")
 ):
     """Search for files by name and optional type or tag."""
     async def _search():
         client = await get_authenticated_client()
         try:
+            if page < 1:
+                raise TSGError("Page must be >= 1")
+
             if not query and not tag:
                 raise TSGError("Provide a search query or --tag")
 
@@ -135,18 +146,18 @@ def search(
                 msg_parts.append(f"tag '{tag}'")
             console.print(f"[cyan]Searching files for {' and '.join(msg_parts)}...[/cyan]")
 
-            files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort, tag=tag)
+            files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort, tag=tag, page=page)
 
             if not files:
                 console.print("[yellow]No matching files found.[/yellow]")
                 return
 
             if trimmed_query and tag:
-                title = "Search Results (Query + Tag)"
+                title = f"Search Results (Query + Tag) - Page {page}"
             elif tag and not trimmed_query:
-                title = f"Files (Tag: {tag})"
+                title = f"Files (Tag: {tag}) - Page {page}"
             else:
-                title = f"Search Results: '{trimmed_query}'"
+                title = f"Search Results: '{trimmed_query}' - Page {page}"
 
             if ft:
                 title += f" (Type: {ft})"
