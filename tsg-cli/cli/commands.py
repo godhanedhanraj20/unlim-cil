@@ -7,6 +7,7 @@ import os
 from services.auth import interactive_login, get_authenticated_client
 from services.file_service import upload_file, list_files, download_file, delete_file, search_files
 from utils.errors import TSGError
+from utils.metadata_manager import add_tag, remove_tag, get_tags
 
 app = typer.Typer(help="TSG-CLI: Telegram Storage CLI")
 console = Console()
@@ -147,6 +148,39 @@ def search(
             await client.disconnect()
 
     run_async(_search())
+
+@app.command()
+def tag(
+    file_id: str = typer.Argument(..., help="ID of the file"),
+    action: str = typer.Argument(..., help="Action to perform: add, remove, list"),
+    tag_name: str = typer.Argument(None, help="The tag name (required for add/remove)")
+):
+    """Manage tags for a file."""
+    try:
+        if action == "add":
+            if not tag_name:
+                raise TSGError("Tag name is required for adding a tag.")
+            add_tag(file_id, tag_name)
+            console.print(f"[green]Tag added: {tag_name}[/green]")
+        elif action == "remove":
+            if not tag_name:
+                raise TSGError("Tag name is required for removing a tag.")
+            remove_tag(file_id, tag_name)
+            console.print(f"[green]Tag removed: {tag_name}[/green]")
+        elif action == "list":
+            tags = get_tags(file_id)
+            if tags:
+                console.print(f"[cyan]Tags: {', '.join(tags)}[/cyan]")
+            else:
+                console.print("[yellow]No tags found.[/yellow]")
+        else:
+            raise TSGError("Invalid action. Use: add, remove, list")
+    except TSGError as e:
+        console.print(f"[red]{str(e)}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print("[red]Unexpected error occurred. Please try again.[/red]")
+        raise typer.Exit(1)
 
 @app.command()
 def delete(file_id: int = typer.Argument(..., help="ID of the file to delete")):
