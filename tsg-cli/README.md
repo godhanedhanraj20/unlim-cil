@@ -15,20 +15,30 @@ Ready to jump in? Here are the quickest steps to get started:
 
 ---
 
-## 📂 Where Are My Files Stored?
+## ✨ Features (Full List)
 
-Your files are uploaded securely and directly to your Telegram **"Saved Messages"** chat.
-This means you can easily see them on your phone, tablet, or web browser simply by opening the Telegram app and looking at your Saved Messages!
+- **Login securely:** Uses your Telegram account (supports OTP and optional 2FA passwords).
+- **Upload files:** Send any file up to 2GB straight to your Saved Messages.
+- **List your files:** View a clean table of all the files you've stored.
+- **Download files:** Easily retrieve your files by their ID.
+- **Delete files:** Remove files from your storage forever.
+- **Search files:** Find files quickly by keyword.
+- **Filter by type:** Only show videos, images, documents, or audio (`--type`).
+- **Sort results:** Order your files by date, size, or name (`--sort`).
+- **Limit results:** Control how many files you want to see (`--limit`).
+- **Upload progress:** Watch real-time upload progress with transfer speeds (MB/s).
+- **Download progress:** Watch real-time download progress with transfer speeds (MB/s).
 
 ---
 
-## ✨ Features
+## 🧠 How It Works
 
-- **Login securely:** Uses your Telegram account (supports OTP and 2FA passwords).
-- **Upload files:** Send any file up to 2GB straight to your Saved Messages.
-- **List your files:** View a clean table of all the files you've stored, complete with file sizes and dates.
-- **Download files:** Easily retrieve your files to your computer.
-- **Delete files:** Remove files from your storage when you no longer need them.
+It is incredibly simple:
+- Your files are uploaded securely and directly to your Telegram **"Saved Messages"** chat.
+- Each file you upload simply becomes one Telegram message.
+- The CLI uses the unique Telegram message ID as the "File ID".
+
+This means you can easily see them on your phone, tablet, or web browser simply by opening the Telegram app and looking at your Saved Messages!
 
 ---
 
@@ -88,79 +98,79 @@ The tool will ask you for:
 
 ---
 
-## 💻 Usage (Commands)
+## 💻 Commands
 
 Here is how you use the tool to manage your files.
 
-### 📤 Upload a file
-To upload a file to your storage:
+### 🔐 login
+Logs you securely into your Telegram account.
 ```bash
-python main.py upload <file_path>
+python main.py login
 ```
 
-### 📄 List your files
-To see a table of the files you have stored:
+### 📤 upload
+Upload a file to your storage.
+```bash
+python main.py upload <file>
+```
+
+### 📄 list
+List the files you have stored.
 ```bash
 python main.py list
-```
-If you want to see more files (up to 200), use the `--limit` option:
-```bash
-python main.py list --limit 100
+python main.py list --sort date
+python main.py list --sort size
 ```
 
-### 📥 Download a file
-Find the **ID** of the file you want from the `list` command, then download it:
+### 🔍 search
+Find specific files by typing a keyword.
+```bash
+python main.py search <query>
+python main.py search <query> --type video
+python main.py search <query> --sort size
+python main.py search <query> --limit 20
+```
+
+### 📥 download
+Download a file using its ID.
 ```bash
 python main.py download <id>
 ```
 
-If you want to download it to a specific folder:
-```bash
-python main.py download <id> --output <folder_path>
-```
-
-### 🗑️ Delete a file
-To remove a file from your storage forever:
+### 🗑️ delete
+Remove a file from your storage forever.
 ```bash
 python main.py delete <id>
 ```
-*The tool will always ask you to confirm (y/n) before deleting.*
 
 ---
 
-## 📸 Example Output
+## 🌟 Real Examples
 
-Wondering what it looks like? Here is an example of listing files:
+Wondering how to put it all together? Try these:
 
-```
-Fetching files...
-                             Stored Files
-┏━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
-┃    ID ┃ Name             ┃    Size ┃ Date                ┃
-┡━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
-│ 12345 │ vac_photo.jpg    │ 2.45 MB │ 2024-05-12 14:32:00 │
-│ 12344 │ budget.pdf       │ 0.85 MB │ 2024-05-10 09:15:22 │
-│ 12343 │ movie.mp4        │ 1.20 GB │ 2024-05-09 20:45:11 │
-└───────┴──────────────────┴─────────┴─────────────────────┘
+Search for a video with "pokemon" in the name, sort it by size, and only show 5 results:
+```bash
+python main.py search pokemon --type video --sort size --limit 5
 ```
 
-And here is what happens when you upload:
-
+List all your files alphabetically by name:
+```bash
+python main.py list --sort name
 ```
-Uploading my_file.txt...
-Upload successful
-Message ID: 12346
-File name: my_file.txt
-File size: 12.00 KB
+
+Upload a movie to your storage:
+```bash
+python main.py upload movie.mp4
 ```
 
 ---
 
-## ⚠️ Notes & Limitations
+## ⚠️ Limitations
 
-- **Max file size:** Telegram limits the size of a single file to **2GB**.
+- **Max file size:** Telegram allows a maximum of **2GB** per file.
 - **No folders:** Your files are stored in a flat list without a folder structure.
-- **Storage Location:** All files are placed directly in your Telegram "Saved Messages" chat.
+- **Dependencies:** The tool depends on the Telegram API to function.
 - **Internet:** You must be connected to the internet for the tool to work.
 
 ---
@@ -173,13 +183,3 @@ If something goes wrong, the tool will try to give you a helpful error message. 
 - **"File not found" or "Invalid file path."** 👉 Make sure you typed the file path or folder correctly.
 - **Network issues.** 👉 Check your internet connection.
 - **Config file is corrupted.** 👉 If you see this, simply delete the corrupted configuration file by deleting the `~/.tsg-cli/config.json` file on your computer, and run the login command again.
-
----
-
-## 📁 Project Structure (For the curious)
-
-If you look inside the code, here is how things are organized simply:
-- **`cli/`**: Contains the code that understands the commands you type (like `upload` or `download`).
-- **`services/`**: The main logic that talks to Telegram and handles logging in or moving files.
-- **`telegram/`**: The connection bridge that securely connects to the Telegram network.
-- **`utils/`**: Small helpers that format text (like showing "1.5 GB" instead of bytes) and handle errors.
