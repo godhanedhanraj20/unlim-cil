@@ -94,9 +94,10 @@ def download(
 @app.command()
 def search(
     query: str = typer.Argument(..., help="Keyword to search for in file names"),
-    limit: int = typer.Option(50, "--limit", "-l", help="Number of files to return (max 200)")
+    limit: int = typer.Option(50, "--limit", "-l", help="Number of files to return (max 200)"),
+    file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type (video, image, document, audio)")
 ):
-    """Search for files by name."""
+    """Search for files by name and optional type."""
     async def _search():
         client = await get_authenticated_client()
         try:
@@ -104,14 +105,25 @@ def search(
             if not trimmed_query:
                 raise TSGError("Search query cannot be empty.")
 
+            if file_type:
+                ft = file_type.lower()
+                if ft not in ["video", "image", "document", "audio"]:
+                    raise TSGError("Invalid type. Use: video, image, document, audio")
+            else:
+                ft = None
+
             console.print(f"[cyan]Searching files for '{trimmed_query}'...[/cyan]")
-            files = await search_files(client, trimmed_query, limit)
+            files = await search_files(client, trimmed_query, limit, file_type=ft)
 
             if not files:
                 console.print("[yellow]No matching files found.[/yellow]")
                 return
 
-            table = Table(title=f"Search Results: '{trimmed_query}'")
+            title = f"Search Results: '{trimmed_query}'"
+            if ft:
+                title += f" (Type: {ft})"
+
+            table = Table(title=title)
             table.add_column("ID", justify="left", style="cyan", no_wrap=True)
             table.add_column("Name", style="magenta")
             table.add_column("Size", justify="right", style="green")
