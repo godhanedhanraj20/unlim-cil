@@ -73,27 +73,6 @@ async def interactive_login():
     console.print("[green]Successfully logged in![/green]")
     await client.disconnect()
 
-def is_logged_in() -> bool:
-    config = load_config()
-    api_id = config.get("api_id")
-    api_hash = config.get("api_hash")
-
-    if not api_id or not api_hash:
-        return False
-
-    client = get_client(api_id, api_hash)
-
-    async def check_auth():
-        try:
-            await client.connect()
-            me = await client.get_me()
-            await client.disconnect()
-            return bool(me)
-        except Exception:
-            return False
-
-    return asyncio.run(check_auth())
-
 async def get_authenticated_client() -> Client:
     config = load_config()
     api_id = config.get("api_id")
