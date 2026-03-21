@@ -9,10 +9,6 @@ MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 # 2GB
 
 async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
     abs_path = os.path.abspath(file_path)
-    print(f"[DEBUG] File path: {abs_path}")
-    print(f"[DEBUG] File exists: {os.path.exists(abs_path)}")
-    print(f"[DEBUG] Client connected before send: {client.is_connected}")
-
     if not os.path.exists(abs_path):
         raise TSGError("File not found. Please check the file path and try again.")
 
@@ -21,16 +17,18 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
         raise TSGError("File exceeds 2GB limit. Cannot upload.")
 
     try:
-        msg = await client.send_document("me", document=abs_path)
-        print(f"[DEBUG] Upload response: {msg}")
-        metadata = extract_message_metadata(msg)
+        if not client.is_connected:
+            await client.connect()
+
+        message = await client.send_document("me", document=abs_path)
+        metadata = extract_message_metadata(message)
         if not metadata:
             raise TSGError("Failed to extract metadata after upload.")
         return metadata
     except Exception as e:
-        print(f"[DEBUG] Upload exception type: {type(e)}")
-        print(f"[DEBUG] Upload exception: {str(e)}")
-        raise
+        if isinstance(e, TSGError):
+            raise e
+        raise TSGError(f"Upload failed: {str(e)}")
 
 async def list_files(client: Client, limit: int = 50) -> List[Dict[str, Any]]:
     # Enforce max limit = 200

@@ -82,20 +82,11 @@ async def get_authenticated_client() -> Client:
 
     client = get_client(api_id, api_hash)
     try:
-        session_path = os.path.expanduser("~/.tsg-cli/session.session")
-        print(f"[DEBUG] Session file exists: {os.path.exists(session_path)}")
-        print(f"[DEBUG] Client object: {client}")
-        print("[DEBUG] Initializing client")
         await client.connect()
-        print(f"[DEBUG] Client connected: {client.is_connected}")
-
         user = await client.get_me()
-        print(f"[DEBUG] get_me() result: {user}")
+        client.me = user  # Fix: Ensure Pyrogram internal state is fully initialized
 
-        if user:
-            print(f"[DEBUG] User ID: {user.id}")
-            print(f"[DEBUG] User is_premium: {getattr(user, 'is_premium', None)}")
-        else:
+        if not user:
             await client.disconnect()
             raise TSGError("Authentication failed. Please login again.")
         return client
