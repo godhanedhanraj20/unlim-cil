@@ -122,3 +122,28 @@ async def delete_file(client: Client, file_id: int):
         raise e
     except Exception as e:
         raise Exception("Delete failed. Please try again.")
+
+async def search_files(client: Client, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+    # Enforce max limit = 200
+    if limit > 200:
+        limit = 200
+
+    query = query.strip().lower()
+    if not query:
+        raise TSGError("Search query cannot be empty.")
+
+    files = []
+    try:
+        # Fetch newest first (default in Pyrogram)
+        async for message in client.get_chat_history("me"):
+            metadata = extract_message_metadata(message)
+            if metadata:
+                # Filter by filename matching query
+                if query in metadata['name'].lower():
+                    files.append(metadata)
+                    if len(files) >= limit:
+                        break
+    except Exception as e:
+        raise Exception("Failed to search files. Please try again.")
+
+    return files

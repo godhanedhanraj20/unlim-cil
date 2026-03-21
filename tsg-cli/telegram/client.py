@@ -1,6 +1,6 @@
 import logging
 from pyrogram import Client
-from utils.config_manager import load_config, SESSION_FILE
+from utils.config_manager import SESSION_FILE
 
 # Suppress Pyrogram internal flood wait logs and standard info
 logging.getLogger("pyrogram").setLevel(logging.ERROR)

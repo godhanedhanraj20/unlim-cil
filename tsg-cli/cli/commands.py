@@ -5,7 +5,7 @@ from rich.table import Table
 import os
 
 from services.auth import interactive_login, get_authenticated_client
-from services.file_service import upload_file, list_files, download_file, delete_file
+from services.file_service import upload_file, list_files, download_file, delete_file, search_files
 from utils.errors import TSGError
 
 app = typer.Typer(help="TSG-CLI: Telegram Storage CLI")
@@ -90,6 +90,41 @@ def download(
             await client.disconnect()
 
     run_async(_download())
+
+@app.command()
+def search(
+    query: str = typer.Argument(..., help="Keyword to search for in file names"),
+    limit: int = typer.Option(50, "--limit", "-l", help="Number of files to return (max 200)")
+):
+    """Search for files by name."""
+    async def _search():
+        client = await get_authenticated_client()
+        try:
+            trimmed_query = query.strip()
+            if not trimmed_query:
+                raise TSGError("Search query cannot be empty.")
+
+            console.print(f"[cyan]Searching files for '{trimmed_query}'...[/cyan]")
+            files = await search_files(client, trimmed_query, limit)
+
+            if not files:
+                console.print("[yellow]No matching files found.[/yellow]")
+                return
+
+            table = Table(title=f"Search Results: '{trimmed_query}'")
+            table.add_column("ID", justify="left", style="cyan", no_wrap=True)
+            table.add_column("Name", style="magenta")
+            table.add_column("Size", justify="right", style="green")
+            table.add_column("Date", style="blue")
+
+            for f in files:
+                table.add_row(str(f["id"]), f["name"], f["size"], f["date"])
+
+            console.print(table)
+        finally:
+            await client.disconnect()
+
+    run_async(_search())
 
 @app.command()
 def delete(file_id: int = typer.Argument(..., help="ID of the file to delete")):
