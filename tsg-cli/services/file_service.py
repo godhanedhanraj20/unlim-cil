@@ -17,6 +17,9 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
         raise TSGError("File exceeds 2GB limit. Cannot upload.")
 
     try:
+        if not client.is_connected:
+            await client.connect()
+
         message = await client.send_document("me", document=abs_path)
         metadata = extract_message_metadata(message)
         if not metadata:

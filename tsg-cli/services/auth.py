@@ -83,10 +83,11 @@ async def get_authenticated_client() -> Client:
     client = get_client(api_id, api_hash)
     try:
         await client.connect()
-        me = await client.get_me()
-        if not me:
+        await asyncio.sleep(1) # Allow Telegram client state to fully sync
+        user = await client.get_me()
+        if not user:
             await client.disconnect()
-            raise TSGError("Session expired or invalid. Run: python main.py login")
+            raise TSGError("Authentication failed. Please login again.")
         return client
     except Exception as e:
         if isinstance(e, TSGError):
