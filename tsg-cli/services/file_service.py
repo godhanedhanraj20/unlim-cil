@@ -1,8 +1,9 @@
 import os
+import time
 import asyncio
 from typing import List, Dict, Any
 from pyrogram import Client
-from utils.parser import extract_message_metadata
+from utils.parser import extract_message_metadata, format_size
 from utils.errors import TSGError
 
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 # 2GB
@@ -16,12 +17,21 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
     if file_size > MAX_FILE_SIZE:
         raise TSGError("File exceeds 2GB limit. Cannot upload.")
 
+    start_time = time.time()
+
     async def progress(current, total):
+        elapsed = time.time() - start_time
+        speed = current / elapsed if elapsed > 0 else 0
+        speed_mb = speed / (1024 * 1024)
+
+        c_fmt = format_size(current)
+        t_fmt = format_size(total) if total > 0 else "?"
+
         if total > 0:
             percent = current * 100 / total
-            print(f"\rUploading... {percent:.2f}% ({current}/{total})", end="", flush=True)
+            print(f"\rUploading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
         else:
-            print(f"\rUploading... ({current} bytes)", end="", flush=True)
+            print(f"\rUploading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
     try:
         if not client.is_connected:
@@ -85,12 +95,23 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
 
         file_path = os.path.join(output_directory, metadata['name'])
 
+        # Start time is a list so we can mutate it in the closure during retries if needed,
+        # or we just re-assign start_time before retry. Using a list is safer for closure scoping in python.
+        time_tracker = [time.time()]
+
         async def progress(current, total):
+            elapsed = time.time() - time_tracker[0]
+            speed = current / elapsed if elapsed > 0 else 0
+            speed_mb = speed / (1024 * 1024)
+
+            c_fmt = format_size(current)
+            t_fmt = format_size(total) if total > 0 else "?"
+
             if total > 0:
                 percent = current * 100 / total
-                print(f"\rDownloading... {percent:.2f}% ({current}/{total})", end="", flush=True)
+                print(f"\rDownloading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
             else:
-                print(f"\rDownloading... ({current} bytes)", end="", flush=True)
+                print(f"\rDownloading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
         # Download the file
         try:
@@ -100,6 +121,7 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                 chat = message.chat
                 await client.get_chat(chat.id)
                 print() # Ensure the next retry output is clean
+                time_tracker[0] = time.time() # Reset start time for retry
                 downloaded_path = await client.download_media(message, file_name=file_path, progress=progress)
             else:
                 raise
