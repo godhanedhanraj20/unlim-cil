@@ -8,15 +8,16 @@ from utils.errors import TSGError
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 # 2GB
 
 async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
-    if not os.path.exists(file_path):
+    abs_path = os.path.abspath(file_path)
+    if not os.path.exists(abs_path):
         raise TSGError("File not found. Please check the file path and try again.")
 
-    file_size = os.path.getsize(file_path)
+    file_size = os.path.getsize(abs_path)
     if file_size > MAX_FILE_SIZE:
         raise TSGError("File exceeds 2GB limit. Cannot upload.")
 
     try:
-        message = await client.send_document("me", document=file_path)
+        message = await client.send_document("me", document=abs_path)
         metadata = extract_message_metadata(message)
         if not metadata:
             raise TSGError("Failed to extract metadata after upload.")
@@ -24,7 +25,7 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
     except Exception as e:
         if isinstance(e, TSGError):
             raise e
-        raise Exception("Upload failed. Please try again.")
+        raise TSGError(f"Upload failed: {str(e)}")
 
 async def list_files(client: Client, limit: int = 50) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
