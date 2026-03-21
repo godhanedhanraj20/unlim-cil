@@ -68,17 +68,26 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
 
         file_path = os.path.join(output_directory, metadata['name'])
 
+        async def progress(current, total):
+            if total > 0:
+                percent = current * 100 / total
+                print(f"\rDownloading... {percent:.2f}% ({current}/{total})", end="", flush=True)
+            else:
+                print(f"\rDownloading... ({current} bytes)", end="", flush=True)
+
         # Download the file
         try:
-            downloaded_path = await client.download_media(message, file_name=file_path)
+            downloaded_path = await client.download_media(message, file_name=file_path, progress=progress)
         except Exception as e:
             if "Peer id invalid" in str(e):
                 chat = message.chat
                 await client.get_chat(chat.id)
-                downloaded_path = await client.download_media(message, file_name=file_path)
+                print() # Ensure the next retry output is clean
+                downloaded_path = await client.download_media(message, file_name=file_path, progress=progress)
             else:
                 raise
 
+        print()  # after download finishes
         if not downloaded_path:
             raise TSGError("Download failed, received empty path from Telegram.")
 
