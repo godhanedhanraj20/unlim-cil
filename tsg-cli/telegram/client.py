@@ -6,5 +6,6 @@ def get_client(api_id: int, api_hash: str) -> Client:
     return Client(
         name=SESSION_FILE,
         api_id=api_id,
-        api_hash=api_hash
+        api_hash=api_hash,
+        no_updates=True
     )

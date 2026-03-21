@@ -69,7 +69,16 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
         file_path = os.path.join(output_directory, metadata['name'])
 
         # Download the file
-        downloaded_path = await client.download_media(message, file_name=file_path)
+        try:
+            downloaded_path = await client.download_media(message, file_name=file_path)
+        except Exception as e:
+            if "Peer id invalid" in str(e):
+                chat = message.chat
+                await client.get_chat(chat.id)
+                downloaded_path = await client.download_media(message, file_name=file_path)
+            else:
+                raise
+
         if not downloaded_path:
             raise TSGError("Download failed, received empty path from Telegram.")
 
