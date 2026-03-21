@@ -7,7 +7,9 @@ import os
 from services.auth import interactive_login, get_authenticated_client
 from services.file_service import upload_file, list_files, download_file, delete_file, search_files
 from utils.errors import TSGError
-from utils.metadata_manager import add_tag, remove_tag, get_tags, set_custom_name, remove_custom_name
+from utils.metadata_manager import add_tag, remove_tag, get_tags, set_custom_name, remove_custom_name, METADATA_FILE
+import shutil
+import json
 
 app = typer.Typer(help="TSG-CLI: Telegram Storage CLI")
 console = Console()
@@ -233,6 +235,78 @@ def rename(
     except Exception as e:
         console.print("[red]Unexpected error occurred. Please try again.[/red]")
         raise typer.Exit(1)
+
+@app.command()
+def backup():
+    """Backup local metadata to Telegram Saved Messages."""
+    async def _backup():
+        client = await get_authenticated_client()
+        try:
+            if not os.path.exists(METADATA_FILE):
+                raise TSGError("No metadata found to backup.")
+
+            console.print("[cyan]Backing up metadata to Telegram...[/cyan]")
+            await client.send_document(
+                "me",
+                document=METADATA_FILE,
+                caption="#TSG_METADATA_BACKUP",
+                file_name="metadata_backup.json"
+            )
+            console.print("[green]Backup uploaded to Telegram[/green]")
+        finally:
+            await client.disconnect()
+
+    run_async(_backup())
+
+@app.command()
+def restore():
+    """Restore metadata from the latest Telegram backup."""
+    async def _restore():
+        client = await get_authenticated_client()
+        try:
+            console.print("[cyan]Searching for latest backup...[/cyan]")
+            latest_backup = None
+
+            async for message in client.get_chat_history("me"):
+                if message.document and message.caption and "#TSG_METADATA_BACKUP" in message.caption:
+                    latest_backup = message
+                    break
+
+            if not latest_backup:
+                raise TSGError("No backup found")
+
+            console.print("[cyan]Downloading backup...[/cyan]")
+
+            temp_dir = os.path.expanduser("~/.tsg-cli/tmp_backup")
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir)
+
+            temp_file = os.path.join(temp_dir, "metadata_temp.json")
+            downloaded_path = await client.download_media(latest_backup, file_name=temp_file)
+
+            if not downloaded_path:
+                raise TSGError("Failed to download backup file.")
+
+            try:
+                with open(downloaded_path, "r") as f:
+                    json.load(f)
+            except Exception:
+                raise TSGError("Backup file is corrupted")
+
+            # Safely replace metadata.json
+            os.replace(downloaded_path, METADATA_FILE)
+
+            # Cleanup temp dir if empty
+            try:
+                os.rmdir(temp_dir)
+            except OSError:
+                pass
+
+            console.print("[green]Metadata restored successfully from Telegram backup[/green]")
+        finally:
+            await client.disconnect()
+
+    run_async(_restore())
 
 @app.command()
 def delete(file_id: int = typer.Argument(..., help="ID of the file to delete")):
