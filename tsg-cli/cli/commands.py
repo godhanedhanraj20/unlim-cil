@@ -258,22 +258,54 @@ def backup():
 
     run_async(_backup())
 
+from utils.parser import format_size
+
 @app.command()
-def restore():
-    """Restore metadata from the latest Telegram backup."""
+def restore(select: bool = typer.Option(False, "--select", help="Choose backup manually")):
+    """Restore metadata from a Telegram backup."""
     async def _restore():
         client = await get_authenticated_client()
         try:
-            console.print("[cyan]Searching for latest backup...[/cyan]")
-            latest_backup = None
+            console.print("[cyan]Searching for backups...[/cyan]")
+            backups = []
 
             async for message in client.get_chat_history("me"):
-                if message.document and message.caption and "#TSG_METADATA_BACKUP" in message.caption:
-                    latest_backup = message
-                    break
+                if message.document and getattr(message, "caption", None) and "#TSG_METADATA_BACKUP" in message.caption:
+                    backups.append(message)
 
-            if not latest_backup:
+            if not backups:
                 raise TSGError("No backup found")
+
+            backups.sort(key=lambda x: x.date, reverse=True)
+
+            if select:
+                table = Table(title="Available Backups")
+                table.add_column("ID", justify="left", style="cyan", no_wrap=True)
+                table.add_column("Name", style="magenta")
+                table.add_column("Size", justify="right", style="green")
+                table.add_column("Date", style="blue")
+
+                for msg in backups:
+                    date_str = msg.date.strftime("%Y-%m-%d %H:%M:%S") if msg.date else "Unknown"
+                    file_name = getattr(msg.document, "file_name", "metadata_backup.json")
+                    file_size = format_size(getattr(msg.document, "file_size", 0))
+                    table.add_row(str(msg.id), file_name, file_size, date_str)
+
+                console.print(table)
+                console.print("[yellow]Enter the backup ID from the table above[/yellow]")
+
+                selected_id = typer.prompt("Backup ID")
+                try:
+                    selected_id = int(selected_id)
+                except ValueError:
+                    raise TSGError("Invalid backup ID")
+
+                selected_backup = next((b for b in backups if b.id == selected_id), None)
+
+                if not selected_backup:
+                    raise TSGError("Invalid backup ID")
+            else:
+                selected_backup = backups[0]
 
             console.print("[cyan]Downloading backup...[/cyan]")
 
@@ -282,7 +314,7 @@ def restore():
                 os.makedirs(temp_dir)
 
             temp_file = os.path.join(temp_dir, "metadata_temp.json")
-            downloaded_path = await client.download_media(latest_backup, file_name=temp_file)
+            downloaded_path = await client.download_media(selected_backup, file_name=temp_file)
 
             if not downloaded_path:
                 raise TSGError("Failed to download backup file.")
