@@ -35,6 +35,10 @@ async def interactive_login():
         me = await client.get_me()
         if me:
             console.print("[green]Already logged in![/green]")
+            if getattr(me, "is_premium", False):
+                console.print("[green]Premium account detected — 4GB upload limit[/green]")
+            else:
+                console.print("[yellow]Free account — 2GB upload limit[/yellow]")
             await client.disconnect()
             return
     except Exception:
@@ -71,6 +75,17 @@ async def interactive_login():
         return
 
     console.print("[green]Successfully logged in![/green]")
+
+    # Show limit logic on fresh login
+    try:
+        me = await client.get_me()
+        if getattr(me, "is_premium", False):
+            console.print("[green]Premium account detected — 4GB upload limit[/green]")
+        else:
+            console.print("[yellow]Free account — 2GB upload limit[/yellow]")
+    except Exception:
+        pass
+
     await client.disconnect()
 
 async def get_authenticated_client() -> Client:

@@ -7,36 +7,42 @@ from utils.parser import extract_message_metadata, format_size
 from utils.errors import TSGError
 from utils.metadata_manager import get_custom_name
 
-MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024 # 2GB
-
 async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
     abs_path = os.path.abspath(file_path)
     if not os.path.exists(abs_path):
         raise TSGError("File not found. Please check the file path and try again.")
 
-    file_size = os.path.getsize(abs_path)
-    if file_size > MAX_FILE_SIZE:
-        raise TSGError("File exceeds 2GB limit. Cannot upload.")
-
-    start_time = time.time()
-
-    async def progress(current, total):
-        elapsed = time.time() - start_time
-        speed = current / elapsed if elapsed > 0 else 0
-        speed_mb = speed / (1024 * 1024)
-
-        c_fmt = format_size(current)
-        t_fmt = format_size(total) if total > 0 else "?"
-
-        if total > 0:
-            percent = current * 100 / total
-            print(f"\rUploading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
-        else:
-            print(f"\rUploading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
-
     try:
         if not client.is_connected:
             await client.connect()
+
+        # Ensure client.me is populated
+        if not getattr(client, "me", None):
+            client.me = await client.get_me()
+
+        is_premium = getattr(client.me, "is_premium", False)
+        max_size = 4 * 1024 * 1024 * 1024 if is_premium else 2 * 1024 * 1024 * 1024
+
+        file_size = os.path.getsize(abs_path)
+        if file_size > max_size:
+            limit_str = "4GB" if is_premium else "2GB"
+            raise TSGError(f"File exceeds upload limit ({limit_str})")
+
+        start_time = time.time()
+
+        async def progress(current, total):
+            elapsed = time.time() - start_time
+            speed = current / elapsed if elapsed > 0 else 0
+            speed_mb = speed / (1024 * 1024)
+
+            c_fmt = format_size(current)
+            t_fmt = format_size(total) if total > 0 else "?"
+
+            if total > 0:
+                percent = current * 100 / total
+                print(f"\rUploading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
+            else:
+                print(f"\rUploading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
         message = await client.send_document("me", document=abs_path, progress=progress)
         print() # Move to next line after upload finishes
