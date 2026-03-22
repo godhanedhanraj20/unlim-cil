@@ -36,6 +36,12 @@ def login():
 def upload(file_path: str = typer.Argument(..., help="Path to the file to upload")):
     """Upload a file to Telegram Saved Messages."""
     async def _upload():
+        if not os.path.exists(file_path):
+            console.print("[red]File not found[/red]")
+            console.print("[yellow]Tip: wrap filenames with spaces in quotes[/yellow]")
+            console.print('Example: upload "my file.mp4"')
+            raise typer.Exit(1)
+
         client = await get_authenticated_client()
         try:
             console.print(f"[cyan]Uploading {file_path}...[/cyan]")
@@ -54,7 +60,8 @@ def list_cmd(
     limit: int = typer.Option(50, "--limit", "-l", help="Number of files to list (max 200)"),
     sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
     tag: str = typer.Option(None, "--tag", help="Filter files by tag (virtual folder)"),
-    page: int = typer.Option(1, "--page", help="Page number")
+    page: int = typer.Option(1, "--page", help="Page number"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
 ):
     """List files stored in Telegram Saved Messages."""
     async def _list():
@@ -67,10 +74,13 @@ def list_cmd(
                 raise TSGError("Invalid sort. Use: date, size, name")
 
             console.print("[cyan]Fetching files...[/cyan]")
-            files = await list_files(client, limit, sort_by=sort, tag=tag, page=page)
+            files = await list_files(client, limit, sort_by=sort, tag=tag, page=page, debug=debug)
 
             if not files:
-                console.print("[yellow]No files found in Saved Messages.[/yellow]")
+                console.print("[yellow]No files found.[/yellow]")
+                console.print("\n[cyan]Try:[/cyan]")
+                console.print("  search pokemon")
+                console.print("  search --tag anime")
                 return
 
             if tag:
@@ -117,7 +127,8 @@ def search(
     file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type (video, image, document, audio)"),
     sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
     tag: str = typer.Option(None, "--tag", help="Filter by tag"),
-    page: int = typer.Option(1, "--page", help="Page number")
+    page: int = typer.Option(1, "--page", help="Page number"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
 ):
     """Search for files by name and optional type or tag."""
     async def _search():
@@ -126,8 +137,13 @@ def search(
             if page < 1:
                 raise TSGError("Page must be >= 1")
 
-            if not query and not tag:
-                raise TSGError("Provide a search query or --tag")
+            if not query and not tag and not file_type:
+                console.print("[yellow]Available commands:[/yellow]")
+                console.print("  login")
+                console.print("  upload <file>")
+                console.print("  list")
+                console.print("  search <query>")
+                raise typer.Exit(1)
 
             if sort and sort not in ["date", "size", "name"]:
                 raise TSGError("Invalid sort. Use: date, size, name")
@@ -146,12 +162,17 @@ def search(
                 msg_parts.append(f"query '{trimmed_query}'")
             if tag:
                 msg_parts.append(f"tag '{tag}'")
+            if ft:
+                msg_parts.append(f"type '{ft}'")
             console.print(f"[cyan]Searching files for {' and '.join(msg_parts)}...[/cyan]")
 
-            files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort, tag=tag, page=page)
+            files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort, tag=tag, page=page, debug=debug)
 
             if not files:
-                console.print("[yellow]No matching files found.[/yellow]")
+                console.print("[yellow]No files found.[/yellow]")
+                console.print("\n[cyan]Try:[/cyan]")
+                console.print("  search pokemon")
+                console.print("  search --tag anime")
                 return
 
             if trimmed_query and tag:

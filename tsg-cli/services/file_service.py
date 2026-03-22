@@ -51,7 +51,12 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
             raise e
         raise TSGError(f"Upload failed: {str(e)}")
 
-async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: str = None, page: int = 1) -> List[Dict[str, Any]]:
+def _is_internal_file(metadata: Dict[str, Any]) -> bool:
+    name = metadata.get("name", "")
+    caption = metadata.get("caption", "")
+    return name == "metadata_backup.json" or "#TSG_METADATA_BACKUP" in caption
+
+async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: str = None, page: int = 1, debug: bool = False) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
@@ -59,16 +64,32 @@ async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: 
     start = (page - 1) * limit
     end = start + limit
 
+    tag = tag.lower().strip() if tag else None
+
+    if debug:
+        print(f"[DEBUG] list_files filters: tag='{tag}', sort_by='{sort_by}', limit={limit}, page={page}")
+
     files = []
     try:
         # Fetch newest first (default in Pyrogram)
         async for message in client.get_chat_history("me"):
             metadata = extract_message_metadata(message)
             if metadata:
+                if debug:
+                    print(f"[DEBUG] Raw metadata: {metadata}")
+
+                # Hide internal files
+                if _is_internal_file(metadata):
+                    continue
+
                 # Tag-based filtering (virtual folders)
                 if tag:
-                    tags_value = metadata.get("tags", "")
-                    if tag.lower() not in tags_value.lower():
+                    raw_tags = metadata.get("tags") or []
+                    if isinstance(raw_tags, str):
+                        raw_tags = [t.strip() for t in raw_tags.split(",")] if raw_tags != "-" else []
+                    tags_list = [t.lower() for t in raw_tags if t.strip()]
+
+                    if tag not in tags_list:
                         continue
 
                 files.append(metadata)
@@ -169,7 +190,19 @@ async def delete_file(client: Client, file_id: int):
     except Exception as e:
         raise Exception("Delete failed. Please try again.")
 
-async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None, sort_by: str = None, tag: str = None, page: int = 1) -> List[Dict[str, Any]]:
+def _matches_type(file_name: str, file_type: str) -> bool:
+    ext = file_name.split(".")[-1].lower() if "." in file_name else ""
+    if file_type == "video":
+        return ext in ["mp4", "mkv", "avi"]
+    elif file_type == "image":
+        return ext in ["jpg", "jpeg", "png"]
+    elif file_type == "document":
+        return ext in ["pdf", "txt", "csv"]
+    elif file_type == "audio":
+        return ext in ["mp3", "wav", "ogg", "flac"]
+    return False
+
+async def search_files(client: Client, query: str, limit: int = 50, file_type: str = None, sort_by: str = None, tag: str = None, page: int = 1, debug: bool = False) -> List[Dict[str, Any]]:
     # Enforce max limit = 200
     if limit > 200:
         limit = 200
@@ -177,7 +210,12 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
     start = (page - 1) * limit
     end = start + limit
 
-    query = query.strip() if query else ""
+    query = query.strip().lower() if query else None
+    tag = tag.strip().lower() if tag else None
+    file_type = file_type.strip().lower() if file_type else None
+
+    if debug:
+        print(f"[DEBUG] search_files filters: query='{query}', tag='{tag}', file_type='{file_type}', sort_by='{sort_by}', limit={limit}, page={page}")
 
     files = []
     try:
@@ -186,33 +224,49 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
             if getattr(message, "empty", False) or getattr(message, "service", False):
                 continue
 
-            # Filter by type if provided
-            if file_type:
-                if file_type == "video" and not getattr(message, "video", None):
-                    continue
-                elif file_type == "image" and not getattr(message, "photo", None):
-                    continue
-                elif file_type == "document" and not getattr(message, "document", None):
-                    continue
-                elif file_type == "audio" and not getattr(message, "audio", None):
-                    continue
-
             metadata = extract_message_metadata(message)
-            if metadata:
-                # Name-based filtering
-                if query:
-                    if query.lower() not in metadata["name"].lower():
-                        continue
+            if not metadata:
+                continue
 
-                # Tag-based filtering
-                if tag:
-                    tags_value = metadata.get("tags", "")
-                    if tag.lower() not in tags_value.lower():
-                        continue
+            if debug:
+                print(f"[DEBUG] Raw metadata: {metadata}")
 
-                files.append(metadata)
-                if len(files) >= end:
-                    break
+            file_name = metadata.get("name", "").lower()
+
+            # Hide internal files
+            if _is_internal_file(metadata):
+                continue
+
+            # AND logic: Name-based filtering
+            if query and query not in file_name:
+                continue
+
+            # AND logic: Tag-based filtering
+            if tag:
+                raw_tags = metadata.get("tags") or []
+                if isinstance(raw_tags, str):
+                    raw_tags = [t.strip() for t in raw_tags.split(",")] if raw_tags != "-" else []
+                tags_list = [t.lower() for t in raw_tags if t.strip()]
+
+                if tag not in tags_list:
+                    continue
+
+            # AND logic: Type-based filtering (using extension fallback to mimic Pyrogram attributes safely)
+            if file_type:
+                # Also double check Pyrogram native types as a primary source if they exist
+                has_native = False
+                if file_type == "video" and getattr(message, "video", None): has_native = True
+                elif file_type == "image" and getattr(message, "photo", None): has_native = True
+                elif file_type == "document" and getattr(message, "document", None): has_native = True
+                elif file_type == "audio" and getattr(message, "audio", None): has_native = True
+
+                # If neither native Pyrogram type matches nor extension matches, skip
+                if not has_native and not _matches_type(file_name, file_type):
+                    continue
+
+            files.append(metadata)
+            if len(files) >= end:
+                break
     except Exception as e:
         raise Exception("Failed to search files. Please try again.")
 

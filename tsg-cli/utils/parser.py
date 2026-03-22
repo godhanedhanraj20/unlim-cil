@@ -65,9 +65,15 @@ def extract_message_metadata(message):
     # Get date
     date = message.date.strftime("%Y-%m-%d %H:%M:%S") if getattr(message, "date", None) else "Unknown"
 
-    # Get tags
-    tags = get_tags(str(message.id))
-    formatted_tags = ", ".join(tags) if tags else "-"
+    # Get tags safely
+    raw_tags = get_tags(str(message.id)) or []
+    if isinstance(raw_tags, str):
+        raw_tags = [t.strip() for t in raw_tags.split(",")]
+
+    clean_tags = [t.lower() for t in raw_tags if t.strip()]
+    formatted_tags = ", ".join(clean_tags) if clean_tags else "-"
+
+    caption = getattr(message, "caption", "") or ""
 
     return {
         "id": message.id,
@@ -75,5 +81,6 @@ def extract_message_metadata(message):
         "size": formatted_size,
         "date": date,
         "tags": formatted_tags,
-        "raw_size": file_size
+        "raw_size": file_size,
+        "caption": caption
     }
