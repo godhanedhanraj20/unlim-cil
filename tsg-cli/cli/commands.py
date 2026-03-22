@@ -3,6 +3,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 import os
+from typing import List
 
 from services.auth import interactive_login, get_authenticated_client
 from services.file_service import upload_file, list_files, download_file, delete_file, search_files
@@ -105,16 +106,28 @@ def list_cmd(
 
 @app.command()
 def download(
-    file_id: int = typer.Argument(..., help="ID of the file to download"),
+    file_ids: List[str] = typer.Argument(..., help="ID(s) of the file(s) to download"),
     output: str = typer.Option(".", "--output", "-o", help="Output directory path")
 ):
-    """Download a file by ID."""
+    """Download files by ID."""
     async def _download():
         client = await get_authenticated_client()
+        success = 0
+        failed = 0
         try:
-            console.print(f"[cyan]Downloading file {file_id}...[/cyan]")
-            path = await download_file(client, file_id, output)
-            console.print(f"[green]Downloaded to: {path}[/green]")
+            for fid in file_ids:
+                try:
+                    file_id_int = int(fid)
+                    console.print(f"[cyan]Downloading file {file_id_int}...[/cyan]")
+                    path = await download_file(client, file_id_int, output)
+                    console.print(f"[green]Downloaded to: {path}[/green]")
+                    success += 1
+                except Exception as e:
+                    console.print(f"[red]Failed to download {fid}: {str(e)}[/red]")
+                    failed += 1
+
+            console.print(f"\n[bold]Success: {success}[/bold]")
+            console.print(f"[bold]Failed: {failed}[/bold]")
         finally:
             await client.disconnect()
 
@@ -203,30 +216,44 @@ def search(
 
 @app.command()
 def tag(
-    file_id: str = typer.Argument(..., help="ID of the file"),
+    file_ids_str: str = typer.Argument(..., metavar="FILE_IDS", help="ID(s) of the file(s) separated by commas"),
     action: str = typer.Argument(..., help="Action to perform: add, remove, list"),
     tag_name: str = typer.Argument(None, help="The tag name (required for add/remove)")
 ):
-    """Manage tags for a file."""
+    """Manage tags for files."""
+    success = 0
+    failed = 0
+    file_ids = [fid.strip() for fid in file_ids_str.split(",")]
+
     try:
-        if action == "add":
-            if not tag_name:
-                raise TSGError("Tag name is required for adding a tag.")
-            add_tag(file_id, tag_name)
-            console.print(f"[green]Tag added: {tag_name}[/green]")
-        elif action == "remove":
-            if not tag_name:
-                raise TSGError("Tag name is required for removing a tag.")
-            remove_tag(file_id, tag_name)
-            console.print(f"[green]Tag removed: {tag_name}[/green]")
-        elif action == "list":
-            tags = get_tags(file_id)
-            if tags:
-                console.print(f"[cyan]Tags: {', '.join(tags)}[/cyan]")
-            else:
-                console.print("[yellow]No tags found.[/yellow]")
-        else:
+        if action not in ["add", "remove", "list"]:
             raise TSGError("Invalid action. Use: add, remove, list")
+
+        for fid in file_ids:
+            try:
+                if action == "add":
+                    if not tag_name:
+                        raise TSGError("Tag name is required for adding a tag.")
+                    add_tag(fid, tag_name)
+                    console.print(f"[green]Tag added to {fid}: {tag_name}[/green]")
+                elif action == "remove":
+                    if not tag_name:
+                        raise TSGError("Tag name is required for removing a tag.")
+                    remove_tag(fid, tag_name)
+                    console.print(f"[green]Tag removed from {fid}: {tag_name}[/green]")
+                elif action == "list":
+                    tags = get_tags(fid)
+                    if tags:
+                        console.print(f"[cyan]Tags for {fid}: {', '.join(tags)}[/cyan]")
+                    else:
+                        console.print(f"[yellow]No tags found for {fid}.[/yellow]")
+                success += 1
+            except Exception as e:
+                console.print(f"[red]Failed on {fid}: {str(e)}[/red]")
+                failed += 1
+
+        console.print(f"\n[bold]Success: {success}[/bold]")
+        console.print(f"[bold]Failed: {failed}[/bold]")
     except TSGError as e:
         console.print(f"[red]{str(e)}[/red]")
         raise typer.Exit(1)
@@ -362,19 +389,35 @@ def restore(select: bool = typer.Option(False, "--select", help="Choose backup m
     run_async(_restore())
 
 @app.command()
-def delete(file_id: int = typer.Argument(..., help="ID of the file to delete")):
-    """Delete a file by ID."""
+def delete(file_ids: List[str] = typer.Argument(..., help="ID(s) of the file(s) to delete")):
+    """Delete files by ID."""
     async def _delete():
         client = await get_authenticated_client()
+        success = 0
+        failed = 0
         try:
-            confirm = typer.confirm(f"Are you sure you want to delete file ID {file_id}?")
+            if len(file_ids) == 1:
+                confirm = typer.confirm(f"Are you sure you want to delete file ID {file_ids[0]}?")
+            else:
+                confirm = typer.confirm(f"Are you sure you want to delete these {len(file_ids)} files?")
+
             if not confirm:
                 console.print("[yellow]Deletion cancelled.[/yellow]")
                 return
 
-            console.print(f"[cyan]Deleting file {file_id}...[/cyan]")
-            await delete_file(client, file_id)
-            console.print("[green]File deleted successfully![/green]")
+            for fid in file_ids:
+                try:
+                    file_id_int = int(fid)
+                    console.print(f"[cyan]Deleting file {file_id_int}...[/cyan]")
+                    await delete_file(client, file_id_int)
+                    console.print(f"[green]File {file_id_int} deleted successfully![/green]")
+                    success += 1
+                except Exception as e:
+                    console.print(f"[red]Failed to delete {fid}: {str(e)}[/red]")
+                    failed += 1
+
+            console.print(f"\n[bold]Success: {success}[/bold]")
+            console.print(f"[bold]Failed: {failed}[/bold]")
         finally:
             await client.disconnect()
 
