@@ -10,36 +10,36 @@ from utils.parser import extract_message_metadata, format_size
 from utils.errors import TSGError
 from utils.metadata_manager import get_custom_name
 
-CHECKPOINT_FILE = os.path.expanduser("~/.tsg-cli/download_progress.json")
-
-def load_checkpoint() -> dict:
-    if os.path.exists(CHECKPOINT_FILE):
-        with open(CHECKPOINT_FILE, "r") as f:
-            try:
-                return json.load(f)
-            except Exception:
-                return {}
-    return {}
-
-def save_checkpoint(file_id: str, downloaded: int):
-    data = load_checkpoint()
-    data[file_id] = downloaded
-    with open(CHECKPOINT_FILE, "w") as f:
-        json.dump(data, f)
-
-def clear_checkpoint(file_id: str):
-    data = load_checkpoint()
-    if file_id in data:
-        del data[file_id]
-        with open(CHECKPOINT_FILE, "w") as f:
-            json.dump(data, f)
-
 console = Console()
+
+def load_checkpoint(file_path: str) -> int:
+    cp_file = file_path + ".checkpoint"
+    if os.path.exists(cp_file):
+        with open(cp_file, "r") as f:
+            try:
+                data = json.load(f)
+                return data.get("downloaded", 0)
+            except Exception:
+                return 0
+    return 0
+
+def save_checkpoint(file_path: str, downloaded: int):
+    cp_file = file_path + ".checkpoint"
+    with open(cp_file, "w") as f:
+        json.dump({"downloaded": downloaded}, f)
+
+def clear_checkpoint(file_path: str):
+    cp_file = file_path + ".checkpoint"
+    if os.path.exists(cp_file):
+        try:
+            os.remove(cp_file)
+        except OSError:
+            pass
 
 async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
     abs_path = os.path.abspath(file_path)
     if not os.path.exists(abs_path):
-        raise TSGError("File not found. Please check the file path and try again.")
+        raise TSGError("File not found")
 
     try:
         if not client.is_connected:
@@ -57,33 +57,62 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
             limit_str = "4GB" if is_premium else "2GB"
             raise TSGError(f"File exceeds upload limit ({limit_str})")
 
-        start_time = time.time()
+        time_tracker = [time.time()]
 
         async def progress(current, total):
-            elapsed = time.time() - start_time
-            speed = current / elapsed if elapsed > 0 else 0
-            speed_mb = speed / (1024 * 1024)
+            elapsed = time.time() - time_tracker[0]
+            elapsed = elapsed if elapsed > 0 else 1
+            speed = current / elapsed
 
             c_fmt = format_size(current)
             t_fmt = format_size(total) if total > 0 else "?"
+            s_fmt = format_size(speed)
 
             if total > 0:
                 percent = current * 100 / total
-                print(f"\rUploading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
+                print(f"\rUploading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {s_fmt}/s", end="", flush=True)
             else:
-                print(f"\rUploading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
+                print(f"\rUploading... ({c_fmt}) | {s_fmt}/s", end="", flush=True)
 
-        message = await client.send_document("me", document=abs_path, progress=progress)
-        print() # Move to next line after upload finishes
+        max_retries = 3
 
-        metadata = extract_message_metadata(message)
-        if not metadata:
-            raise TSGError("Failed to extract metadata after upload.")
-        return metadata
+        for attempt in range(max_retries):
+            try:
+                message = await client.send_document("me", document=abs_path, progress=progress)
+                print() # Move to next line after upload finishes
+
+                metadata = extract_message_metadata(message)
+                if not metadata:
+                    raise TSGError("Failed to extract metadata after upload.")
+
+                return metadata
+
+            except KeyboardInterrupt:
+                print() # clear progress line
+                raise TSGError("Upload cancelled by user")
+            except TSGError as e:
+                print()
+                raise e
+            except Exception as e:
+                print() # Ensure the next retry output is clean
+
+                err_str = str(e).lower()
+                is_transient = any(x in err_str for x in ["timeout", "connection", "network", "reset"])
+
+                if attempt == max_retries - 1:
+                    raise TSGError(f"Upload failed after retries: {str(e)}")
+
+                if not is_transient:
+                    raise e
+
+                console.print(f"[yellow]Retrying upload... ({attempt+1}/{max_retries})[/yellow]")
+
+                await asyncio.sleep(2 * (attempt + 1))
+                time_tracker[0] = time.time()
+
+    except TSGError as e:
+        raise e
     except Exception as e:
-        print() # Ensure the next line is clean if it fails mid-upload
-        if isinstance(e, TSGError):
-            raise e
         raise TSGError(f"Upload failed: {str(e)}")
 
 def _is_internal_file(metadata: Dict[str, Any]) -> bool:
@@ -180,14 +209,16 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
         last_downloaded = -1
 
         BUFFER_SIZE = 4 * 1024 * 1024  # 4MB
+        CHECKPOINT_INTERVAL = 20 * 1024 * 1024  # 20MB
+        LOG_INTERVAL = 100 * 1024 * 1024  # 100MB
 
         for attempt in range(max_retries):
-            progress_data = load_checkpoint()
-            file_id_str = str(file_id)
-            existing_size = progress_data.get(file_id_str, 0)
+            existing_size = load_checkpoint(file_path)
 
             if os.path.exists(file_path):
-                existing_size = os.path.getsize(file_path)
+                file_sz = os.path.getsize(file_path)
+                if file_sz > existing_size:
+                    existing_size = file_sz
             else:
                 existing_size = 0
 
@@ -205,14 +236,21 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                 raise TSGError("Download stuck at same point repeatedly. Possible network/CDN issue.")
 
             buffer = bytearray()
+            last_checkpoint_size = existing_size
+            last_log_size = existing_size
 
             try:
                 mode = "ab" if existing_size > 0 else "wb"
                 bytes_written = 0
                 bytes_skipped = 0
+                stream_yielded = False
 
                 with open(file_path, mode) as f:
                     async for chunk in client.stream_media(message):
+                        if not chunk:
+                            continue
+
+                        stream_yielded = True
                         chunk_len = len(chunk)
 
                         # Skip logic to simulate resume support natively
@@ -237,9 +275,15 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                         if len(buffer) >= BUFFER_SIZE:
                             f.write(buffer)
                             buffer.clear()
-                            save_checkpoint(file_id_str, downloaded_total)
-                            print()
-                            console.print(f"[cyan]Checkpoint saved at {format_size(downloaded_total)}[/cyan]")
+
+                            if downloaded_total - last_checkpoint_size >= CHECKPOINT_INTERVAL:
+                                save_checkpoint(file_path, downloaded_total)
+                                last_checkpoint_size = downloaded_total
+
+                            if downloaded_total - last_log_size >= LOG_INTERVAL:
+                                print()
+                                console.print(f"[cyan]Checkpoint saved at {format_size(downloaded_total)}[/cyan]")
+                                last_log_size = downloaded_total
 
                         # Progress tracking
                         elapsed = time.time() - time_tracker[0]
@@ -256,15 +300,34 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                             print(f"\rDownloading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
                     # After loop ends
+                    if not stream_yielded and expected_size > 0 and existing_size == 0:
+                        raise TSGError("Telegram stream error")
+
                     if buffer:
                         f.write(buffer)
                         buffer.clear()
+                        save_checkpoint(file_path, existing_size + bytes_written)
 
                 download_success = True
                 break
 
+            except KeyboardInterrupt:
+                if buffer:
+                    with open(file_path, "ab") as f:
+                        f.write(buffer)
+                    save_checkpoint(file_path, existing_size + bytes_written)
+                raise
             except Exception as e:
                 print() # Ensure the next retry output is clean
+                if isinstance(e, TSGError) and "Telegram stream error" in str(e):
+                    raise e
+
+                # DO NOT delete file unless it's empty
+                if os.path.exists(file_path) and os.path.getsize(file_path) == 0:
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
 
                 if attempt == max_retries - 1:
                     raise TSGError(f"Download failed after retries: {str(e)}")
@@ -279,22 +342,30 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                 if not message or getattr(message, "empty", False):
                     raise TSGError(f"File with ID {file_id} not found during retry.")
 
+                if not getattr(message, "document", None) and not getattr(message, "video", None) and not getattr(message, "audio", None) and not getattr(message, "photo", None):
+                    raise TSGError("Download failed: message document missing")
+
                 if "Peer id invalid" in str(e):
                     chat = message.chat
                     await client.get_chat(chat.id)
 
-                # Reset start time
+                # Reset start time AFTER retry
                 time_tracker[0] = time.time()
 
         print()  # after download finishes
 
-        if not download_success or not os.path.exists(file_path):
-            raise TSGError("Download failed: Telegram returned empty file (possible network or large file issue)")
+        if not download_success:
+            raise TSGError("Download failed after retries")
 
-        if expected_size > 0 and os.path.getsize(file_path) != expected_size:
-            raise TSGError("Download incomplete")
+        if not os.path.exists(file_path):
+            raise TSGError("Download failed: file missing")
 
-        clear_checkpoint(str(file_id))
+        final_size = os.path.getsize(file_path)
+        actual_expected = getattr(message.document or message.video or message.audio or message.photo, "file_size", expected_size)
+        if actual_expected > 0 and final_size < actual_expected:
+            raise TSGError("Download incomplete: file size mismatch")
+
+        clear_checkpoint(file_path)
         return file_path
     except TSGError as e:
         raise e
