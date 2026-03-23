@@ -25,7 +25,7 @@ def run_async(coro):
         console.print("\n[yellow]Operation cancelled by user.[/yellow]")
         raise typer.Exit(1)
     except Exception as e:
-        console.print("[red]Unexpected error occurred. Please try again.[/red]")
+        console.print(f"[red]Error: {str(e)}[/red]")
         raise typer.Exit(1)
 
 @app.command()
@@ -258,7 +258,7 @@ def tag(
         console.print(f"[red]{str(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
-        console.print("[red]Unexpected error occurred. Please try again.[/red]")
+        console.print(f"[red]Error: {str(e)}[/red]")
         raise typer.Exit(1)
 
 @app.command()

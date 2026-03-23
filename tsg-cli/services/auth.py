@@ -29,64 +29,65 @@ async def interactive_login():
     client = get_client(api_id, api_hash)
 
     console.print("[cyan]Connecting to Telegram...[/cyan]")
-    await client.connect()
+    try:
+        await client.connect()
+    except Exception:
+        await client.disconnect()
+        await client.connect()
 
     try:
-        me = await client.get_me()
-        if me:
-            console.print("[green]Already logged in![/green]")
+        try:
+            me = await client.get_me()
+            if me:
+                console.print("[green]Already logged in![/green]")
+                if getattr(me, "is_premium", False):
+                    console.print("[green]Premium account detected — 4GB upload limit[/green]")
+                else:
+                    console.print("[yellow]Free account — 2GB upload limit[/yellow]")
+                return
+        except Exception:
+            pass # Not logged in
+
+        phone_number = typer.prompt("Enter your phone number (e.g., +1234567890)")
+
+        try:
+            sent_code = await client.send_code(phone_number)
+        except Exception as e:
+            console.print(f"[red]Error sending code: {str(e)}[/red]")
+            raise TSGError(str(e))
+
+        phone_code = typer.prompt("Enter the OTP code received on Telegram")
+
+        try:
+            await client.sign_in(phone_number, sent_code.phone_code_hash, phone_code)
+        except SessionPasswordNeeded:
+            password = typer.prompt("Two-Step Verification enabled. Enter your password", hide_input=True)
+            try:
+                await client.check_password(password)
+            except Exception as e:
+                console.print(f"[red]Invalid password: {str(e)}[/red]")
+                raise TSGError(str(e))
+        except (PhoneCodeInvalid, PhoneCodeExpired) as e:
+            console.print(f"[red]Invalid or expired code: {str(e)}[/red]")
+            raise TSGError(str(e))
+        except Exception as e:
+            console.print(f"[red]Failed to sign in: {str(e)}[/red]")
+            raise TSGError(str(e))
+
+        console.print("[green]Successfully logged in![/green]")
+
+        # Show limit logic on fresh login
+        try:
+            me = await client.get_me()
             if getattr(me, "is_premium", False):
                 console.print("[green]Premium account detected — 4GB upload limit[/green]")
             else:
                 console.print("[yellow]Free account — 2GB upload limit[/yellow]")
-            await client.disconnect()
-            return
-    except Exception:
-        pass # Not logged in
-
-    phone_number = typer.prompt("Enter your phone number (e.g., +1234567890)")
-
-    try:
-        sent_code = await client.send_code(phone_number)
-    except Exception as e:
-        console.print("[red]Error sending code. Please try again.[/red]")
-        await client.disconnect()
-        return
-
-    phone_code = typer.prompt("Enter the OTP code received on Telegram")
-
-    try:
-        await client.sign_in(phone_number, sent_code.phone_code_hash, phone_code)
-    except SessionPasswordNeeded:
-        password = typer.prompt("Two-Step Verification enabled. Enter your password", hide_input=True)
-        try:
-            await client.check_password(password)
         except Exception as e:
-            console.print("[red]Invalid password. Please try again.[/red]")
-            await client.disconnect()
-            return
-    except (PhoneCodeInvalid, PhoneCodeExpired) as e:
-        console.print("[red]Invalid or expired code. Please try again.[/red]")
+            console.print(f"[red]Error fetching limits: {str(e)}[/red]")
+
+    finally:
         await client.disconnect()
-        return
-    except Exception as e:
-        console.print("[red]Failed to sign in. Please try again.[/red]")
-        await client.disconnect()
-        return
-
-    console.print("[green]Successfully logged in![/green]")
-
-    # Show limit logic on fresh login
-    try:
-        me = await client.get_me()
-        if getattr(me, "is_premium", False):
-            console.print("[green]Premium account detected — 4GB upload limit[/green]")
-        else:
-            console.print("[yellow]Free account — 2GB upload limit[/yellow]")
-    except Exception:
-        pass
-
-    await client.disconnect()
 
 async def get_authenticated_client() -> Client:
     config = load_config()

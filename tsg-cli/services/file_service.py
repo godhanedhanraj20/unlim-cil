@@ -102,7 +102,7 @@ async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: 
                 if len(files) >= end:
                     break
     except Exception as e:
-        raise Exception("Failed to list files. Please try again.")
+        raise TSGError(f"Failed to list files: {str(e)}")
 
     if sort_by == "date":
         files.sort(key=lambda x: x["date"], reverse=True)
@@ -178,7 +178,7 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
     except TSGError as e:
         raise e
     except Exception as e:
-        raise Exception("Download failed. Please try again.")
+        raise TSGError(f"Download failed: {str(e)}")
 
 async def delete_file(client: Client, file_id: int):
     try:
@@ -194,7 +194,7 @@ async def delete_file(client: Client, file_id: int):
     except TSGError as e:
         raise e
     except Exception as e:
-        raise Exception("Delete failed. Please try again.")
+        raise TSGError(f"Delete failed: {str(e)}")
 
 def _matches_type(file_name: str, file_type: str) -> bool:
     ext = file_name.split(".")[-1].lower() if "." in file_name else ""
@@ -274,7 +274,7 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
             if len(files) >= end:
                 break
     except Exception as e:
-        raise Exception("Failed to search files. Please try again.")
+        raise TSGError(f"Failed to search files: {str(e)}")
 
     if sort_by == "date":
         files.sort(key=lambda x: x["date"], reverse=True)
