@@ -34,24 +34,53 @@ def login():
     run_async(interactive_login())
 
 @app.command()
-def upload(file_path: str = typer.Argument(..., help="Path to the file to upload")):
-    """Upload a file to Telegram Saved Messages."""
+def upload(files: List[str] = typer.Argument(..., help="Path(s) to the file(s) to upload")):
+    """Upload files to Telegram Saved Messages."""
     async def _upload():
-        if not os.path.exists(file_path):
-            console.print("[red]File not found[/red]")
-            console.print("[yellow]Tip: wrap filenames with spaces in quotes[/yellow]")
-            console.print('Example: upload "my file.mp4"')
-            raise typer.Exit(1)
+        if len(files) > 3:
+            confirm = typer.confirm(f"Upload {len(files)} files?")
+            if not confirm:
+                raise typer.Exit()
 
         client = await get_authenticated_client()
+        success = 0
+        failed = 0
+
         try:
-            console.print(f"[cyan]Uploading {file_path}...[/cyan]")
-            metadata = await upload_file(client, file_path)
-            console.print("[green]Upload successful[/green]")
-            console.print(f"Message ID: {metadata['id']}")
-            console.print(f"File name: {metadata['name']}")
-            console.print(f"File size: {metadata['size']}")
+            for file_path in files:
+                try:
+                    file_path = os.path.abspath(file_path)
+
+                    if not os.path.exists(file_path):
+                        console.print(f"[red]File not found: {file_path}[/red]")
+                        console.print("[yellow]Tip: wrap filenames with spaces in quotes[/yellow]")
+                        failed += 1
+                        continue
+
+                    console.print(f"[cyan]Uploading: {file_path}[/cyan]")
+                    metadata = await upload_file(client, file_path)
+                    console.print(f"[green]Uploaded: {file_path}[/green]")
+                    console.print(f"Message ID: {metadata['id']}")
+                    console.print(f"File name: {metadata['name']}")
+                    console.print(f"File size: {metadata['size']}")
+                    success += 1
+
+                except KeyboardInterrupt:
+                    raise  # Caught by the outer loop
+                except TSGError as e:
+                    console.print(f"[red]Failed to upload {file_path}: {str(e)}[/red]")
+                    failed += 1
+                except Exception as e:
+                    console.print(f"[red]Failed to upload {file_path}: {str(e)}[/red]")
+                    failed += 1
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Batch upload cancelled by user[/yellow]")
+            raise typer.Exit(1)
         finally:
+            console.print()
+            console.print(f"[green]Success: {success}[/green]")
+            console.print(f"[red]Failed: {failed}[/red]")
             await client.disconnect()
 
     run_async(_upload())
