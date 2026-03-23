@@ -3,9 +3,12 @@ import time
 import asyncio
 from typing import List, Dict, Any
 from pyrogram import Client
+from rich.console import Console
 from utils.parser import extract_message_metadata, format_size
 from utils.errors import TSGError
 from utils.metadata_manager import get_custom_name
+
+console = Console()
 
 async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
     abs_path = os.path.abspath(file_path)
@@ -157,22 +160,46 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
             else:
                 print(f"\rDownloading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
-        # Download the file
-        try:
-            downloaded_path = await client.download_media(message, file_name=file_path, progress=progress)
-        except Exception as e:
-            if "Peer id invalid" in str(e):
-                chat = message.chat
-                await client.get_chat(chat.id)
-                print() # Ensure the next retry output is clean
-                time_tracker[0] = time.time() # Reset start time for retry
+        # Download the file with retries
+        max_retries = 3
+        downloaded_path = None
+
+        for attempt in range(max_retries):
+            try:
                 downloaded_path = await client.download_media(message, file_name=file_path, progress=progress)
-            else:
-                raise
+                if downloaded_path:
+                    break
+                raise Exception("Empty path returned")
+            except Exception as e:
+                print() # Ensure the next retry output is clean
+
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
+
+                if attempt == max_retries - 1:
+                    raise TSGError(f"Download failed after retries: {str(e)}")
+
+                console.print(f"[yellow]Retrying download... ({attempt+1}/{max_retries})[/yellow]")
+
+                # Force message refetch
+                message = await client.get_messages("me", file_id)
+                if not message or getattr(message, "empty", False):
+                    raise TSGError(f"File with ID {file_id} not found during retry.")
+
+                if "Peer id invalid" in str(e):
+                    chat = message.chat
+                    await client.get_chat(chat.id)
+
+                # Reset start time
+                time_tracker[0] = time.time()
 
         print()  # after download finishes
-        if not downloaded_path:
-            raise TSGError("Download failed, received empty path from Telegram.")
+
+        if not downloaded_path or not os.path.exists(downloaded_path):
+            raise TSGError("Download failed: Telegram returned empty file (possible network or large file issue)")
 
         return downloaded_path
     except TSGError as e:
