@@ -1,12 +1,38 @@
 import os
 import time
 import asyncio
+import json
+import random
 from typing import List, Dict, Any
 from pyrogram import Client
 from rich.console import Console
 from utils.parser import extract_message_metadata, format_size
 from utils.errors import TSGError
 from utils.metadata_manager import get_custom_name
+
+CHECKPOINT_FILE = os.path.expanduser("~/.tsg-cli/download_progress.json")
+
+def load_checkpoint() -> dict:
+    if os.path.exists(CHECKPOINT_FILE):
+        with open(CHECKPOINT_FILE, "r") as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return {}
+    return {}
+
+def save_checkpoint(file_id: str, downloaded: int):
+    data = load_checkpoint()
+    data[file_id] = downloaded
+    with open(CHECKPOINT_FILE, "w") as f:
+        json.dump(data, f)
+
+def clear_checkpoint(file_id: str):
+    data = load_checkpoint()
+    if file_id in data:
+        del data[file_id]
+        with open(CHECKPOINT_FILE, "w") as f:
+            json.dump(data, f)
 
 console = Console()
 
@@ -150,7 +176,16 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
         max_retries = 3
         download_success = False
 
+        same_progress_count = 0
+        last_downloaded = -1
+
+        BUFFER_SIZE = 4 * 1024 * 1024  # 4MB
+
         for attempt in range(max_retries):
+            progress_data = load_checkpoint()
+            file_id_str = str(file_id)
+            existing_size = progress_data.get(file_id_str, 0)
+
             if os.path.exists(file_path):
                 existing_size = os.path.getsize(file_path)
             else:
@@ -158,6 +193,18 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
 
             if existing_size > 0:
                 console.print(f"\n[cyan]Resuming download from {format_size(existing_size)}[/cyan]")
+
+            if existing_size == last_downloaded:
+                same_progress_count += 1
+            else:
+                same_progress_count = 0
+
+            last_downloaded = existing_size
+
+            if same_progress_count >= 3:
+                raise TSGError("Download stuck at same point repeatedly. Possible network/CDN issue.")
+
+            buffer = bytearray()
 
             try:
                 mode = "ab" if existing_size > 0 else "wb"
@@ -175,17 +222,26 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                         elif bytes_skipped < existing_size:
                             # Write the remainder of the chunk
                             remainder = existing_size - bytes_skipped
-                            f.write(chunk[remainder:])
+                            buffer.extend(chunk[remainder:])
                             bytes_skipped += remainder
 
                             written_chunk = chunk_len - remainder
                             bytes_written += written_chunk
                         else:
-                            f.write(chunk)
+                            buffer.extend(chunk)
                             bytes_written += chunk_len
 
-                        # Progress tracking
                         downloaded_total = existing_size + bytes_written
+
+                        # Buffer system
+                        if len(buffer) >= BUFFER_SIZE:
+                            f.write(buffer)
+                            buffer.clear()
+                            save_checkpoint(file_id_str, downloaded_total)
+                            print()
+                            console.print(f"[cyan]Checkpoint saved at {format_size(downloaded_total)}[/cyan]")
+
+                        # Progress tracking
                         elapsed = time.time() - time_tracker[0]
                         speed = bytes_written / elapsed if elapsed > 0 else 0
                         speed_mb = speed / (1024 * 1024)
@@ -199,6 +255,11 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                         else:
                             print(f"\rDownloading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
+                    # After loop ends
+                    if buffer:
+                        f.write(buffer)
+                        buffer.clear()
+
                 download_success = True
                 break
 
@@ -209,6 +270,9 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                     raise TSGError(f"Download failed after retries: {str(e)}")
 
                 console.print(f"[yellow]Stream interrupted, retrying... ({attempt+1}/{max_retries})[/yellow]")
+
+                delay = 2 * (attempt + 1) + random.random()
+                await asyncio.sleep(delay)
 
                 # Force message refetch
                 message = await client.get_messages("me", file_id)
@@ -230,6 +294,7 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
         if expected_size > 0 and os.path.getsize(file_path) != expected_size:
             raise TSGError("Download incomplete")
 
+        clear_checkpoint(str(file_id))
         return file_path
     except TSGError as e:
         raise e
