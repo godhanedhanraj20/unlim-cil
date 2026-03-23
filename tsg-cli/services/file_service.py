@@ -141,48 +141,74 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
             final_name = getattr(message.document or message.video or message.audio or message.photo, "file_name", metadata['name'])
 
         file_path = os.path.join(output_directory, final_name)
+        expected_size = metadata.get("raw_size", 0)
 
-        # Start time is a list so we can mutate it in the closure during retries if needed,
-        # or we just re-assign start_time before retry. Using a list is safer for closure scoping in python.
+        # Start time tracking for progress speed calculation
         time_tracker = [time.time()]
-
-        async def progress(current, total):
-            elapsed = time.time() - time_tracker[0]
-            speed = current / elapsed if elapsed > 0 else 0
-            speed_mb = speed / (1024 * 1024)
-
-            c_fmt = format_size(current)
-            t_fmt = format_size(total) if total > 0 else "?"
-
-            if total > 0:
-                percent = current * 100 / total
-                print(f"\rDownloading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
-            else:
-                print(f"\rDownloading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
         # Download the file with retries
         max_retries = 3
-        downloaded_path = None
+        download_success = False
 
         for attempt in range(max_retries):
+            if os.path.exists(file_path):
+                existing_size = os.path.getsize(file_path)
+            else:
+                existing_size = 0
+
+            if existing_size > 0:
+                console.print(f"\n[cyan]Resuming download from {format_size(existing_size)}[/cyan]")
+
             try:
-                downloaded_path = await client.download_media(message, file_name=file_path, progress=progress)
-                if downloaded_path:
-                    break
-                raise Exception("Empty path returned")
+                mode = "ab" if existing_size > 0 else "wb"
+                bytes_written = 0
+                bytes_skipped = 0
+
+                with open(file_path, mode) as f:
+                    async for chunk in client.stream_media(message):
+                        chunk_len = len(chunk)
+
+                        # Skip logic to simulate resume support natively
+                        if bytes_skipped + chunk_len <= existing_size:
+                            bytes_skipped += chunk_len
+                            continue
+                        elif bytes_skipped < existing_size:
+                            # Write the remainder of the chunk
+                            remainder = existing_size - bytes_skipped
+                            f.write(chunk[remainder:])
+                            bytes_skipped += remainder
+
+                            written_chunk = chunk_len - remainder
+                            bytes_written += written_chunk
+                        else:
+                            f.write(chunk)
+                            bytes_written += chunk_len
+
+                        # Progress tracking
+                        downloaded_total = existing_size + bytes_written
+                        elapsed = time.time() - time_tracker[0]
+                        speed = bytes_written / elapsed if elapsed > 0 else 0
+                        speed_mb = speed / (1024 * 1024)
+
+                        c_fmt = format_size(downloaded_total)
+                        t_fmt = format_size(expected_size) if expected_size > 0 else "?"
+
+                        if expected_size > 0:
+                            percent = (downloaded_total / expected_size) * 100
+                            print(f"\rDownloading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
+                        else:
+                            print(f"\rDownloading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
+
+                download_success = True
+                break
+
             except Exception as e:
                 print() # Ensure the next retry output is clean
-
-                if os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                    except OSError:
-                        pass
 
                 if attempt == max_retries - 1:
                     raise TSGError(f"Download failed after retries: {str(e)}")
 
-                console.print(f"[yellow]Retrying download... ({attempt+1}/{max_retries})[/yellow]")
+                console.print(f"[yellow]Stream interrupted, retrying... ({attempt+1}/{max_retries})[/yellow]")
 
                 # Force message refetch
                 message = await client.get_messages("me", file_id)
@@ -198,10 +224,13 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
 
         print()  # after download finishes
 
-        if not downloaded_path or not os.path.exists(downloaded_path):
+        if not download_success or not os.path.exists(file_path):
             raise TSGError("Download failed: Telegram returned empty file (possible network or large file issue)")
 
-        return downloaded_path
+        if expected_size > 0 and os.path.getsize(file_path) != expected_size:
+            raise TSGError("Download incomplete")
+
+        return file_path
     except TSGError as e:
         raise e
     except Exception as e:
