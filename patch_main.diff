@@ -1,0 +1,11 @@
+--- tsg-cli/main.py
++++ tsg-cli/main.py
+@@ -2,4 +2,7 @@
+ from cli.commands import app
+
+ if __name__ == "__main__":
+-    app()
++    try:
++        app()
++    except KeyboardInterrupt:
++        print("\nOperation cancelled by user")
