@@ -89,7 +89,7 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
 
             except KeyboardInterrupt:
                 print() # clear progress line
-                raise TSGError("Upload cancelled by user")
+                raise
             except TSGError as e:
                 print()
                 raise e
@@ -367,6 +367,9 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
 
         clear_checkpoint(file_path)
         return file_path
+    except KeyboardInterrupt:
+        print()
+        raise TSGError("Download cancelled by user")
     except TSGError as e:
         raise e
     except Exception as e:

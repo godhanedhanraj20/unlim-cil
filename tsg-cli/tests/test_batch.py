@@ -17,3 +17,22 @@ def test_batch_download():
 def test_partial_failure():
     # Verify that the typer argument signature accepts string for manual splitting
     assert "file_ids_str" in tag.__annotations__
+
+@pytest.mark.asyncio
+async def test_download_keyboard_interrupt():
+    from services.file_service import download_file
+    from utils.errors import TSGError
+    import os
+
+    # Mock client and message
+    client = AsyncMock()
+    message = MagicMock()
+    message.document = MagicMock(file_size=100)
+    message.document.file_name = "test.txt"
+    client.get_messages.return_value = message
+
+    async def mock_stream(*args, **kwargs):
+        raise KeyboardInterrupt()
+        yield b"chunk"
+
+    client.stream_media = mock_stream

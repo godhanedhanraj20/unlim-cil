@@ -177,7 +177,6 @@ def download(
         client = await get_authenticated_client()
         success = 0
         failed = 0
-        interrupted = False
 
         total_files = len(file_ids)
 
@@ -203,13 +202,11 @@ def download(
                     console.print(f"[red]Failed to download {fid}: {str(e)}[/red]")
                     failed += 1
 
-            if not interrupted:
-                console.print()
-                console.print(f"[green]Success: {success}[/green]")
-                console.print(f"[red]Failed: {failed}[/red]")
+            console.print()
+            console.print(f"[green]Success: {success}[/green]")
+            console.print(f"[red]Failed: {failed}[/red]")
 
         except KeyboardInterrupt:
-            interrupted = True
             console.print("\n[yellow]Batch download cancelled by user[/yellow]")
             raise typer.Exit(1)
         finally:
