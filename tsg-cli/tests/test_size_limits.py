@@ -2,7 +2,7 @@ import pytest
 import os
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from services.file_service import upload_file, list_files, download_file
+from services.file_service import upload_file, search_files, download_file
 from utils.errors import TSGError
 
 # We use simple mocks since we aren't executing real Pyrogram clients

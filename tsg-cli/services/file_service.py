@@ -3,14 +3,11 @@ import time
 import asyncio
 import json
 import random
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable
 from pyrogram import Client
-from rich.console import Console
 from utils.parser import extract_message_metadata, format_size
 from utils.errors import TSGError
 from utils.metadata_manager import get_custom_name
-
-console = Console()
 
 def load_checkpoint(file_path: str) -> int:
     cp_file = file_path + ".checkpoint"
@@ -36,7 +33,7 @@ def clear_checkpoint(file_path: str):
         except OSError:
             pass
 
-async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
+async def upload_file(client: Client, file_path: str, log_cb: Callable[[str, str], None] = None) -> Dict[str, Any]:
     abs_path = os.path.abspath(file_path)
     if not os.path.exists(abs_path):
         raise TSGError("File not found")
@@ -70,9 +67,9 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
 
             if total > 0:
                 percent = current * 100 / total
-                print(f"\rUploading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {s_fmt}/s", end="", flush=True)
+                print(f"\r  Uploading: {percent:.2f}% ({c_fmt}/{t_fmt}) | {s_fmt}/s", end="", flush=True)
             else:
-                print(f"\rUploading... ({c_fmt}) | {s_fmt}/s", end="", flush=True)
+                print(f"\r  Uploading: ({c_fmt}) | {s_fmt}/s", end="", flush=True)
 
         max_retries = 3
 
@@ -105,7 +102,8 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
                 if not is_transient:
                     raise e
 
-                console.print(f"[yellow]Retrying upload... ({attempt+1}/{max_retries})[/yellow]")
+                if log_cb:
+                    log_cb("warn", f"Retrying upload... [{attempt+1}/{max_retries}]")
 
                 await asyncio.sleep(2 * (attempt + 1))
                 time_tracker[0] = time.time()
@@ -118,69 +116,22 @@ async def upload_file(client: Client, file_path: str) -> Dict[str, Any]:
 def _is_internal_file(metadata: Dict[str, Any]) -> bool:
     name = metadata.get("name", "")
     caption = metadata.get("caption", "")
-    return name == "metadata_backup.json" or "#TSG_METADATA_BACKUP" in caption
 
-async def list_files(client: Client, limit: int = 50, sort_by: str = None, tag: str = None, page: int = 1, debug: bool = False) -> List[Dict[str, Any]]:
-    # Enforce max limit = 200
-    if limit > 200:
-        limit = 200
+    # Internal metadata file
+    if name == "metadata.json" and "tsg-cli" in caption.lower():
+        return True
 
-    start = (page - 1) * limit
-    end = start + limit
+    # Backup files
+    if "#TSG_METADATA_BACKUP" in caption:
+        return True
 
-    tag = tag.lower().strip() if tag else None
+    return False
 
-    if debug:
-        print(f"[DEBUG] list_files filters: tag='{tag}', sort_by='{sort_by}', limit={limit}, page={page}")
+async def get_files(client: Client, limit: int = 50, sort_by: str = None, file_type: str = None, tag: str = None, page: int = 1, debug: bool = False) -> List[Dict[str, Any]]:
+    return await search_files(client, query=None, limit=limit, file_type=file_type, sort_by=sort_by, tag=tag, page=page, debug=debug)
 
-    files = []
+async def download_file(client: Client, file_id: int, output_directory: str, log_cb: Callable[[str, str], None] = None) -> str:
     try:
-        # Fetch newest first (default in Pyrogram)
-        async for message in client.get_chat_history("me"):
-            metadata = extract_message_metadata(message)
-            if metadata:
-                if debug:
-                    print(f"[DEBUG] Raw metadata: {metadata}")
-
-                # Hide internal files
-                if _is_internal_file(metadata):
-                    continue
-
-                # Tag-based filtering (virtual folders)
-                if tag:
-                    raw_tags = metadata.get("tags") or []
-                    if isinstance(raw_tags, str):
-                        raw_tags = [t.strip() for t in raw_tags.split(",")] if raw_tags != "-" else []
-                    tags_list = [t.lower() for t in raw_tags if t.strip()]
-
-                    if tag not in tags_list:
-                        continue
-
-                files.append(metadata)
-                if len(files) >= end:
-                    break
-    except Exception as e:
-        raise TSGError(f"Failed to list files: {str(e)}")
-
-    if sort_by == "date":
-        files.sort(key=lambda x: x["date"], reverse=True)
-    elif sort_by == "size":
-        files.sort(key=lambda x: x["raw_size"], reverse=True)
-    elif sort_by == "name":
-        files.sort(key=lambda x: x["name"].lower())
-
-    paginated_items = files[start:end]
-    return paginated_items
-
-async def download_file(client: Client, file_id: int, output_directory: str) -> str:
-    if not os.path.exists(output_directory):
-        raise TSGError("Output directory not found. Please check the directory path and try again.")
-
-    if not os.path.isdir(output_directory):
-        raise TSGError("Path is not a directory. Please provide a valid directory path.")
-
-    try:
-        # get_messages returns a single message if passed a single ID
         message = await client.get_messages("me", file_id)
         if not message or getattr(message, "empty", False):
             raise TSGError(f"File with ID {file_id} not found.")
@@ -223,7 +174,8 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                 existing_size = 0
 
             if existing_size > 0:
-                console.print(f"\n[cyan]Resuming download from {format_size(existing_size)}[/cyan]")
+                if log_cb:
+                    log_cb("info", f"Resuming download from {format_size(existing_size)}")
 
             if existing_size == last_downloaded:
                 same_progress_count += 1
@@ -282,7 +234,8 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
 
                             if downloaded_total - last_log_size >= LOG_INTERVAL:
                                 print()
-                                console.print(f"[cyan]Checkpoint saved at {format_size(downloaded_total)}[/cyan]")
+                                if log_cb:
+                                    log_cb("info", f"Checkpoint saved at {format_size(downloaded_total)}")
                                 last_log_size = downloaded_total
 
                         # Progress tracking
@@ -295,9 +248,9 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
 
                         if expected_size > 0:
                             percent = (downloaded_total / expected_size) * 100
-                            print(f"\rDownloading... {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
+                            print(f"\r  Downloading: {percent:.2f}% ({c_fmt}/{t_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
                         else:
-                            print(f"\rDownloading... ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
+                            print(f"\r  Downloading: ({c_fmt}) | {speed_mb:.2f} MB/s", end="", flush=True)
 
                     # After loop ends
                     if not stream_yielded and expected_size > 0 and existing_size == 0:
@@ -332,7 +285,8 @@ async def download_file(client: Client, file_id: int, output_directory: str) -> 
                 if attempt == max_retries - 1:
                     raise TSGError(f"Download failed after retries: {str(e)}")
 
-                console.print(f"[yellow]Stream interrupted, retrying... ({attempt+1}/{max_retries})[/yellow]")
+                if log_cb:
+                    log_cb("warn", f"Stream interrupted, retrying... [{attempt+1}/{max_retries}]")
 
                 delay = 2 * (attempt + 1) + random.random()
                 await asyncio.sleep(delay)
@@ -415,9 +369,6 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
     tag = tag.strip().lower() if tag else None
     file_type = file_type.strip().lower() if file_type else None
 
-    if debug:
-        print(f"[DEBUG] search_files filters: query='{query}', tag='{tag}', file_type='{file_type}', sort_by='{sort_by}', limit={limit}, page={page}")
-
     files = []
     try:
         # Fetch newest first (default in Pyrogram)
@@ -428,9 +379,6 @@ async def search_files(client: Client, query: str, limit: int = 50, file_type: s
             metadata = extract_message_metadata(message)
             if not metadata:
                 continue
-
-            if debug:
-                print(f"[DEBUG] Raw metadata: {metadata}")
 
             file_name = metadata.get("name", "").lower()
 

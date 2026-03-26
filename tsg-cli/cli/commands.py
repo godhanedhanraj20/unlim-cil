@@ -1,152 +1,212 @@
+import os
+import sys
 import asyncio
+import json
 import typer
 from rich.console import Console
 from rich.table import Table
-import os
-from typing import List
+from typing import List, Optional
 
-from services.auth import interactive_login, get_authenticated_client
-from services.file_service import upload_file, list_files, download_file, delete_file, search_files
+from services.auth import authenticate_user, check_auth_status, get_authenticated_client
+from services.file_service import upload_file, get_files, download_file, delete_file, search_files
 from utils.errors import TSGError
 from utils.metadata_manager import add_tag, remove_tag, get_tags, set_custom_name, remove_custom_name, METADATA_FILE
-import shutil
-import json
+from utils.parser import format_size
 
 app = typer.Typer(help="TSG-CLI: Telegram Storage CLI")
 console = Console()
 
+# --- UI Helpers ---
+def success(msg: str):
+    console.print(f"[green]✔ {msg}[/green]")
+
+def error(msg: str):
+    console.print(f"[red]❌ {msg}[/red]")
+
+def warn(msg: str):
+    console.print(f"[yellow]⚠ {msg}[/yellow]")
+
+def info(msg: str):
+    console.print(f"[cyan]ℹ {msg}[/cyan]")
+
+def dim(msg: str):
+    console.print(f"[dim]{msg}[/dim]")
+
+def log_cb(level: str, msg: str):
+    """Callback for passing into services so they can trigger CLI prints without importing styling."""
+    if level == "info":
+        info(msg)
+    elif level == "warn":
+        warn(msg)
+    elif level == "error":
+        error(msg)
+    elif level == "dim":
+        dim(msg)
+    else:
+        console.print(msg)
+
+# Utility to run async code in typer
 def run_async(coro):
     try:
-        return asyncio.run(coro)
-    except TSGError as e:
-        console.print(f"[red]{str(e)}[/red]")
-        raise typer.Exit(1)
-    except KeyboardInterrupt:
-        raise typer.Exit(1)
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    try:
+        return loop.run_until_complete(coro)
     except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
-        raise typer.Exit(1)
+        error(f"Error: {str(e)}")
+        sys.exit(1)
 
 @app.command()
 def login():
-    """Authenticate with Telegram using OTP."""
-    run_async(interactive_login())
+    """Authenticate with Telegram."""
+    console.print("\n[bold cyan]=== Login ===[/bold cyan]\n")
+    async def _login():
+        status = await check_auth_status()
+        if status.get("logged_in"):
+            success("Already logged in!")
+            if status.get("is_premium"):
+                success("Premium account detected — 4GB upload limit")
+            else:
+                warn("Free account — 2GB upload limit")
+            return
+
+        def prompt_cb(text: str, is_password: bool):
+            return typer.prompt(text, hide_input=is_password)
+
+        result = await authenticate_user(prompt_cb, log_cb)
+
+        if result.get("status") == "success":
+            success("Successfully logged in!")
+            if result.get("is_premium"):
+                success("Premium account detected — 4GB upload limit")
+            else:
+                warn("Free account — 2GB upload limit")
+        elif result.get("status") == "already_logged_in":
+            success("Already logged in!")
+        else:
+            error("Login failed.")
+
+    try:
+        run_async(_login())
+    except TSGError as e:
+        error(str(e))
+        raise typer.Exit(1)
+    except Exception as e:
+        error(f"Login failed: {str(e)}")
+        raise typer.Exit(1)
 
 @app.command()
-def upload(files: List[str] = typer.Argument(..., help="Path(s) to the file(s) or folder(s) to upload")):
-    """Upload files or folders to Telegram Saved Messages."""
+def upload(path: str = typer.Argument(..., help="Path to the file or directory to upload")):
+    """Upload a file or folder to Saved Messages."""
+    console.print("\n[bold cyan]=== Upload ===[/bold cyan]\n")
+
+    if not os.path.exists(path):
+        error(f"Error: Path '{path}' does not exist.")
+        raise typer.Exit(1)
+
     async def _upload():
-        expanded_files = []
-        for f in files:
-            abs_f = os.path.abspath(f)
-            if os.path.isdir(abs_f):
-                for root, _, filenames in os.walk(abs_f):
-                    for name in filenames:
-                        expanded_files.append(os.path.join(root, name))
-            else:
-                expanded_files.append(abs_f)
-
-        # Remove duplicates and sort
-        expanded_files = list(set(expanded_files))
-        expanded_files.sort()
-
-        if not expanded_files:
-            console.print("[yellow]No files found to upload.[/yellow]")
-            raise typer.Exit()
-
-        if len(expanded_files) > 1:
-            console.print(f"[cyan]Total files to upload: {len(expanded_files)}[/cyan]")
-
-        if len(expanded_files) > 3:
-            confirm = typer.confirm(f"Upload {len(expanded_files)} files?")
-            if not confirm:
-                raise typer.Exit()
-
         client = await get_authenticated_client()
-        success = 0
+        successful = 0
         failed = 0
 
         try:
-            for file_path in expanded_files:
+            if os.path.isfile(path):
+                info(f"Uploading: {os.path.basename(path)} (1/1)")
+                dim(f"({os.path.relpath(path)})")
                 try:
-                    if not client.is_connected:
-                        await client.start()
-                except Exception:
-                    pass
-
-                try:
-                    display_path = os.path.relpath(file_path)
-
-                    if not os.path.exists(file_path):
-                        console.print(f"[red]File not found: {display_path}[/red]")
-                        console.print("[yellow]Tip: wrap filenames with spaces in quotes[/yellow]")
-                        failed += 1
-                        continue
-
-                    console.print(f"[cyan]Uploading: {display_path}[/cyan]")
-                    metadata = await upload_file(client, file_path)
-                    console.print(f"[green]Uploaded: {display_path}[/green]")
-                    console.print(f"Message ID: {metadata['id']}")
-                    console.print(f"File name: {metadata['name']}")
-                    console.print(f"File size: {metadata['size']}")
-                    success += 1
-
-                except KeyboardInterrupt:
-                    raise  # Caught by the outer loop
-                except TSGError as e:
-                    console.print(f"[red]Failed to upload {display_path}: {str(e)}[/red]")
-                    failed += 1
+                    metadata = await upload_file(client, path, log_cb)
+                    success(f"Uploaded: {metadata['name']} (ID: {metadata['id']}, Size: {metadata['size']})")
+                    successful += 1
                 except Exception as e:
-                    console.print(f"[red]Failed to upload {display_path}: {str(e)}[/red]")
+                    error(f"Failed to upload {os.path.basename(path)}: {str(e)}")
                     failed += 1
+            elif os.path.isdir(path):
+                info(f"Scanning folder: {path}")
+                files_to_upload = []
+                for root, _, files in os.walk(path):
+                    for file in files:
+                        files_to_upload.append(os.path.join(root, file))
 
-            console.print()
-            console.print(f"[green]Success: {success}[/green]")
-            console.print(f"[red]Failed: {failed}[/red]")
+                total = len(files_to_upload)
+                if total == 0:
+                    warn("Directory is empty. Nothing to upload.")
+                    return
 
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Batch upload cancelled by user[/yellow]")
-            raise typer.Exit(1)
+                info(f"Found {total} files.")
+                confirm = typer.confirm(f"Upload {total} files?")
+                if not confirm:
+                    warn("Upload cancelled.")
+                    return
+
+                for i, file_path in enumerate(files_to_upload, 1):
+                    console.print()
+                    info(f"Uploading: {os.path.basename(file_path)} ({i}/{total})")
+                    dim(f"({os.path.relpath(file_path)})")
+                    try:
+                        metadata = await upload_file(client, file_path, log_cb)
+                        success(f"Uploaded: {metadata['name']} (ID: {metadata['id']}, Size: {metadata['size']})")
+                        successful += 1
+                    except KeyboardInterrupt:
+                        raise
+                    except TSGError as e:
+                        if "File skipped" in str(e):
+                            warn(f"Skipped: {os.path.basename(file_path)}")
+                            dim(str(e))
+                            successful += 1
+                            continue
+                        error(f"Failed to upload {os.path.basename(file_path)}: {str(e)}")
+                        failed += 1
+                    except Exception as e:
+                        error(f"Failed to upload {os.path.basename(file_path)}: {str(e)}")
+                        failed += 1
+
+            console.print("\n[bold]Summary[/bold]")
+            success(f"Success: {successful}")
+            error(f"Failed: {failed}")
+
         finally:
-            try:
-                await client.stop()
-            except Exception:
-                pass
+            await client.disconnect()
 
     run_async(_upload())
 
-@app.command(name="list")
-def list_cmd(
-    limit: int = typer.Option(50, "--limit", "-l", help="Number of files to list (max 200)"),
-    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
-    tag: str = typer.Option(None, "--tag", help="Filter files by tag (virtual folder)"),
-    page: int = typer.Option(1, "--page", help="Page number"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
+@app.command()
+def list(
+    limit: int = typer.Option(50, help="Number of files to fetch (max 200)"),
+    page: int = typer.Option(1, help="Page number (1-indexed)"),
+    sort: str = typer.Option("date", "--sort", "-s", help="Sort order: date, name, size"),
+    file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type: video, image, document, audio"),
+    tag: str = typer.Option(None, "--tag", help="Filter by tag (supports comma-separated list of tags, e.g., 'work,urgent')"),
+    debug: bool = typer.Option(False, "--debug", hidden=True)
 ):
-    """List files stored in Telegram Saved Messages."""
+    """List uploaded files."""
+    console.print("\n[bold cyan]=== List Files ===[/bold cyan]\n")
     async def _list():
         client = await get_authenticated_client()
         try:
-            if page < 1:
-                raise TSGError("Page must be >= 1")
+            if debug:
+                info(f"Fetching up to {limit} files (Page {page}, Sort: {sort})...")
+            else:
+                info("Fetching files...")
 
-            if sort and sort not in ["date", "size", "name"]:
-                raise TSGError("Invalid sort. Use: date, size, name")
-
-            console.print("[cyan]Fetching files...[/cyan]")
-            files = await list_files(client, limit, sort_by=sort, tag=tag, page=page, debug=debug)
+            files = await get_files(client, limit=limit, sort_by=sort, file_type=file_type, tag=tag, page=page, debug=debug)
 
             if not files:
-                console.print("[yellow]No files found.[/yellow]")
-                console.print("\n[cyan]Try:[/cyan]")
-                console.print("  search pokemon")
-                console.print("  search --tag anime")
+                warn("No files found.")
                 return
 
-            if tag:
-                title = f"Files (Folder: {tag}) - Page {page}"
-            else:
-                title = f"Stored Files (Page {page})"
+            title = f"Files (Page {page})"
+            if file_type or tag:
+                filters = []
+                if file_type: filters.append(f"Type: {file_type}")
+                if tag: filters.append(f"Tags: {tag}")
+                title += f" [{', '.join(filters)}]"
+
             table = Table(title=title)
             table.add_column("ID", justify="left", style="cyan", no_wrap=True)
             table.add_column("Name", style="magenta")
@@ -169,20 +229,21 @@ def download(
     output: str = typer.Option(".", "--output", "-o", help="Output directory path")
 ):
     """Download files by ID."""
+    console.print("\n[bold cyan]=== Download ===[/bold cyan]\n")
     async def _download():
         output_dir = os.path.abspath(output)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
         client = await get_authenticated_client()
-        success = 0
+        successful = 0
         failed = 0
         interrupted = False
 
         total_files = len(file_ids)
 
         try:
-            for i, fid in enumerate(file_ids):
+            for i, fid in enumerate(file_ids, 1):
                 try:
                     if not client.is_connected:
                         await client.start()
@@ -190,27 +251,30 @@ def download(
                     pass
 
                 try:
-                    console.print(f"[cyan]Downloading: {fid}[/cyan] [dim]({i+1}/{total_files})[/dim]")
-                    path = await download_file(client, fid, output_dir)
-                    console.print(f"[green]Downloaded to: {path}[/green]")
-                    success += 1
+                    console.print()
+                    info(f"Downloading: ID {fid} ({i}/{total_files})")
+                    dim(f"Output path: {output_dir}")
+                    path = await download_file(client, fid, output_dir, log_cb)
+                    success(f"Saved to: {os.path.relpath(path)}")
+                    successful += 1
                 except KeyboardInterrupt:
                     raise  # Caught by the outer loop
                 except TSGError as e:
-                    console.print(f"[red]Failed to download {fid}: {str(e)}[/red]")
+                    error(f"Failed to download {fid}: {str(e)}")
                     failed += 1
                 except Exception as e:
-                    console.print(f"[red]Failed to download {fid}: {str(e)}[/red]")
+                    error(f"Failed to download {fid}: {str(e)}")
                     failed += 1
 
             if not interrupted:
-                console.print()
-                console.print(f"[green]Success: {success}[/green]")
-                console.print(f"[red]Failed: {failed}[/red]")
+                console.print("\n[bold]Summary[/bold]")
+                success(f"Success: {successful}")
+                error(f"Failed: {failed}")
 
         except KeyboardInterrupt:
             interrupted = True
-            console.print("\n[yellow]Batch download cancelled by user[/yellow]")
+            console.print()
+            warn("Batch download cancelled by user")
             raise typer.Exit(1)
         finally:
             try:
@@ -223,67 +287,50 @@ def download(
 @app.command()
 def search(
     query: str = typer.Argument(None, help="Keyword to search for in file names"),
-    limit: int = typer.Option(50, "--limit", "-l", help="Number of files to return (max 200)"),
-    file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type (video, image, document, audio)"),
-    sort: str = typer.Option(None, "--sort", help="Sort by: date, size, name"),
-    tag: str = typer.Option(None, "--tag", help="Filter by tag"),
-    page: int = typer.Option(1, "--page", help="Page number"),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug mode")
+    limit: int = typer.Option(50, help="Number of files to fetch (max 200)"),
+    page: int = typer.Option(1, help="Page number (1-indexed)"),
+    sort: str = typer.Option("date", "--sort", "-s", help="Sort order: date, name, size"),
+    file_type: str = typer.Option(None, "--type", "-t", help="Filter by file type: video, image, document, audio"),
+    tag: str = typer.Option(None, "--tag", help="Filter by tag (supports comma-separated tags)"),
+    debug: bool = typer.Option(False, "--debug", hidden=True)
 ):
-    """Search for files by name and optional type or tag."""
+    """Search for files by name, tag, or type."""
+    console.print("\n[bold cyan]=== Search ===[/bold cyan]\n")
     async def _search():
         client = await get_authenticated_client()
         try:
-            if page < 1:
-                raise TSGError("Page must be >= 1")
-
-            if not query and not tag and not file_type:
-                console.print("[yellow]Available commands:[/yellow]")
-                console.print("  login")
-                console.print("  upload <file>")
-                console.print("  list")
-                console.print("  search <query>")
-                raise typer.Exit(1)
-
-            if sort and sort not in ["date", "size", "name"]:
-                raise TSGError("Invalid sort. Use: date, size, name")
-
-            trimmed_query = query.strip() if query else ""
-
-            if file_type:
-                ft = file_type.lower()
-                if ft not in ["video", "image", "document", "audio"]:
-                    raise TSGError("Invalid type. Use: video, image, document, audio")
-            else:
-                ft = None
+            trimmed_query = query.strip() if query else None
+            ft = file_type.strip().lower() if file_type else None
 
             msg_parts = []
-            if trimmed_query:
-                msg_parts.append(f"query '{trimmed_query}'")
-            if tag:
-                msg_parts.append(f"tag '{tag}'")
-            if ft:
-                msg_parts.append(f"type '{ft}'")
-            console.print(f"[cyan]Searching files for {' and '.join(msg_parts)}...[/cyan]")
+            if trimmed_query: msg_parts.append(f"name containing '{trimmed_query}'")
+            if tag: msg_parts.append(f"tag '{tag}'")
+            if ft: msg_parts.append(f"type '{ft}'")
+
+            if not msg_parts:
+                warn("Please provide a search query, --tag, or --type.")
+                raise typer.Exit(1)
+
+            info(f"Searching files for {' and '.join(msg_parts)}...")
 
             files = await search_files(client, trimmed_query, limit, file_type=ft, sort_by=sort, tag=tag, page=page, debug=debug)
 
             if not files:
-                console.print("[yellow]No files found.[/yellow]")
-                console.print("\n[cyan]Try:[/cyan]")
-                console.print("  search pokemon")
-                console.print("  search --tag anime")
+                warn("No files found.")
+                console.print()
+                info("Try:")
+                console.print("  tsg-cli search pokemon")
+                console.print("  tsg-cli search --tag anime")
                 return
 
-            if trimmed_query and tag:
-                title = f"Search Results (Query + Tag) - Page {page}"
-            elif tag and not trimmed_query:
-                title = f"Files (Tag: {tag}) - Page {page}"
-            else:
-                title = f"Search Results: '{trimmed_query}' - Page {page}"
+            title = f"Search Results: Page {page}"
+            filters = []
+            if trimmed_query: filters.append(f"Query: '{trimmed_query}'")
+            if tag: filters.append(f"Tag: {tag}")
+            if ft: filters.append(f"Type: {ft}")
 
-            if ft:
-                title += f" (Type: {ft})"
+            if filters:
+                title += f" [{', '.join(filters)}]"
 
             table = Table(title=title)
             table.add_column("ID", justify="left", style="cyan", no_wrap=True)
@@ -308,7 +355,8 @@ def tag(
     tag_name: str = typer.Argument(None, help="The tag name (required for add/remove)")
 ):
     """Manage tags for files."""
-    success = 0
+    console.print("\n[bold cyan]=== Manage Tags ===[/bold cyan]\n")
+    successful = 0
     failed = 0
     file_ids = [fid.strip() for fid in file_ids_str.split(",")]
 
@@ -322,30 +370,31 @@ def tag(
                     if not tag_name:
                         raise TSGError("Tag name is required for adding a tag.")
                     add_tag(fid, tag_name)
-                    console.print(f"[green]Tag added to {fid}: {tag_name}[/green]")
+                    success(f"Tag added to {fid}: {tag_name}")
                 elif action == "remove":
                     if not tag_name:
                         raise TSGError("Tag name is required for removing a tag.")
                     remove_tag(fid, tag_name)
-                    console.print(f"[green]Tag removed from {fid}: {tag_name}[/green]")
+                    success(f"Tag removed from {fid}: {tag_name}")
                 elif action == "list":
                     tags = get_tags(fid)
                     if tags:
-                        console.print(f"[cyan]Tags for {fid}: {', '.join(tags)}[/cyan]")
+                        info(f"Tags for {fid}: {', '.join(tags)}")
                     else:
-                        console.print(f"[yellow]No tags found for {fid}.[/yellow]")
-                success += 1
+                        warn(f"No tags found for {fid}.")
+                successful += 1
             except Exception as e:
-                console.print(f"[red]Failed on {fid}: {str(e)}[/red]")
+                error(f"Failed on {fid}: {str(e)}")
                 failed += 1
 
-        console.print(f"\n[bold]Success: {success}[/bold]")
-        console.print(f"[bold]Failed: {failed}[/bold]")
+        console.print("\n[bold]Summary[/bold]")
+        success(f"Success: {successful}")
+        error(f"Failed: {failed}")
     except TSGError as e:
-        console.print(f"[red]{str(e)}[/red]")
+        error(f"Error: {str(e)}")
         raise typer.Exit(1)
     except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
+        error(f"Unexpected error: {str(e)}")
         raise typer.Exit(1)
 
 @app.command()
@@ -354,54 +403,55 @@ def rename(
     name: str = typer.Argument(None, help="New custom name (leave empty to reset)")
 ):
     """Rename a file (virtual name)"""
+    console.print("\n[bold cyan]=== Rename File ===[/bold cyan]\n")
     try:
         if name is not None and not name.strip():
             raise TSGError("Name cannot be empty")
 
         if name:
             set_custom_name(file_id, name)
-            console.print(f"[green]Name updated: {name}[/green]")
+            success(f"Name updated: {name}")
         else:
             remove_custom_name(file_id)
-            console.print("[green]Custom name removed[/green]")
+            success("Custom name removed")
     except TSGError as e:
-        console.print(f"[red]{str(e)}[/red]")
+        error(str(e))
         raise typer.Exit(1)
     except Exception as e:
-        console.print("[red]Unexpected error occurred. Please try again.[/red]")
+        error("Unexpected error occurred. Please try again.")
         raise typer.Exit(1)
 
 @app.command()
 def backup():
     """Backup local metadata to Telegram Saved Messages."""
+    console.print("\n[bold cyan]=== Backup Metadata ===[/bold cyan]\n")
     async def _backup():
         client = await get_authenticated_client()
         try:
             if not os.path.exists(METADATA_FILE):
                 raise TSGError("No metadata found to backup.")
 
-            console.print("[cyan]Backing up metadata to Telegram...[/cyan]")
+            info("Backing up metadata to Telegram...")
             await client.send_document(
                 "me",
                 document=METADATA_FILE,
                 caption="#TSG_METADATA_BACKUP",
                 file_name="metadata_backup.json"
             )
-            console.print("[green]Backup uploaded to Telegram[/green]")
+            success("Backup uploaded to Telegram")
         finally:
             await client.disconnect()
 
     run_async(_backup())
 
-from utils.parser import format_size
-
 @app.command()
 def restore(select: bool = typer.Option(False, "--select", help="Choose backup manually")):
     """Restore metadata from a Telegram backup."""
+    console.print("\n[bold cyan]=== Restore Metadata ===[/bold cyan]\n")
     async def _restore():
         client = await get_authenticated_client()
         try:
-            console.print("[cyan]Searching for backups...[/cyan]")
+            info("Searching for backups...")
             backups = []
 
             async for message in client.get_chat_history("me"):
@@ -427,7 +477,7 @@ def restore(select: bool = typer.Option(False, "--select", help="Choose backup m
                     table.add_row(str(msg.id), file_name, file_size, date_str)
 
                 console.print(table)
-                console.print("[yellow]Enter the backup ID from the table above[/yellow]")
+                warn("Enter the backup ID from the table above")
 
                 selected_id = typer.prompt("Backup ID")
                 try:
@@ -442,7 +492,7 @@ def restore(select: bool = typer.Option(False, "--select", help="Choose backup m
             else:
                 selected_backup = backups[0]
 
-            console.print("[cyan]Downloading backup...[/cyan]")
+            info(f"Downloading backup (ID: {selected_backup.id})...")
 
             temp_dir = os.path.expanduser("~/.tsg-cli/tmp_backup")
             if not os.path.exists(temp_dir):
@@ -469,7 +519,7 @@ def restore(select: bool = typer.Option(False, "--select", help="Choose backup m
             except OSError:
                 pass
 
-            console.print("[green]Metadata restored successfully from Telegram backup[/green]")
+            success("Metadata restored successfully from Telegram backup")
         finally:
             await client.disconnect()
 
@@ -478,9 +528,10 @@ def restore(select: bool = typer.Option(False, "--select", help="Choose backup m
 @app.command()
 def delete(file_ids: List[str] = typer.Argument(..., help="ID(s) of the file(s) to delete")):
     """Delete files by ID."""
+    console.print("\n[bold cyan]=== Delete Files ===[/bold cyan]\n")
     async def _delete():
         client = await get_authenticated_client()
-        success = 0
+        successful = 0
         failed = 0
         try:
             if len(file_ids) == 1:
@@ -489,22 +540,24 @@ def delete(file_ids: List[str] = typer.Argument(..., help="ID(s) of the file(s) 
                 confirm = typer.confirm(f"Are you sure you want to delete these {len(file_ids)} files?")
 
             if not confirm:
-                console.print("[yellow]Deletion cancelled.[/yellow]")
+                warn("Deletion cancelled.")
                 return
 
-            for fid in file_ids:
+            total = len(file_ids)
+            for i, fid in enumerate(file_ids, 1):
                 try:
                     file_id_int = int(fid)
-                    console.print(f"[cyan]Deleting file {file_id_int}...[/cyan]")
+                    info(f"Deleting: ID {file_id_int} ({i}/{total})")
                     await delete_file(client, file_id_int)
-                    console.print(f"[green]File {file_id_int} deleted successfully![/green]")
-                    success += 1
+                    success(f"File {file_id_int} deleted successfully")
+                    successful += 1
                 except Exception as e:
-                    console.print(f"[red]Failed to delete {fid}: {str(e)}[/red]")
+                    error(f"Failed to delete {fid}: {str(e)}")
                     failed += 1
 
-            console.print(f"\n[bold]Success: {success}[/bold]")
-            console.print(f"[bold]Failed: {failed}[/bold]")
+            console.print("\n[bold]Summary[/bold]")
+            success(f"Success: {successful}")
+            error(f"Failed: {failed}")
         finally:
             await client.disconnect()
 

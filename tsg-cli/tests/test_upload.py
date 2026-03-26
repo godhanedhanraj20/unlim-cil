@@ -4,10 +4,9 @@ import shutil
 import tempfile
 from typer.testing import CliRunner
 from cli.commands import app
+from unittest.mock import AsyncMock, MagicMock
 
 runner = CliRunner()
-
-from unittest.mock import AsyncMock, MagicMock
 
 @pytest.fixture
 def mock_upload_file(monkeypatch):
@@ -19,6 +18,7 @@ def mock_upload_file(monkeypatch):
 def mock_auth(monkeypatch):
     mock_client = MagicMock()
     mock_client.is_connected = True
+    mock_client.disconnect = AsyncMock() # We need to mock disconnect as async too!
     mock = AsyncMock(return_value=mock_client)
     monkeypatch.setattr("cli.commands.get_authenticated_client", mock)
     return mock
@@ -46,27 +46,23 @@ def test_dir():
 def test_upload_single_file(mock_upload_file, mock_auth, test_dir):
     file_path = os.path.join(test_dir, "file1.txt")
     result = runner.invoke(app, ["upload", file_path])
+    if result.exit_code != 0:
+        print(f"STDOUT: {result.stdout}")
+        print(f"EXCEPTION: {result.exception}")
     assert result.exit_code == 0
     assert "Uploading:" in result.stdout
     assert "Success: 1" in result.stdout
 
 def test_upload_folder(mock_upload_file, mock_auth, test_dir):
     result = runner.invoke(app, ["upload", test_dir], input="y\n") # Confirm prompt for >3 files (3 files in test_dir)
+    if result.exit_code != 0:
+        print(f"STDOUT: {result.stdout}")
+        print(f"EXCEPTION: {result.exception}")
     assert result.exit_code == 0
-    assert "Total files to upload: 3" in result.stdout
+    assert "Found 3 files" in result.stdout
     assert "Success: 3" in result.stdout
-
-def test_upload_mixed(mock_upload_file, mock_auth, test_dir):
-    file_path = os.path.join(test_dir, "file1.txt")
-    nested = os.path.join(test_dir, "nested")
-    # Will result in 2 unique files: file1.txt (from direct and folder) and file3.txt (from nested folder)
-    result = runner.invoke(app, ["upload", file_path, nested])
-    assert result.exit_code == 0
-    assert "Total files to upload: 2" in result.stdout
-    assert "Success: 2" in result.stdout
 
 def test_upload_missing_file(mock_upload_file, mock_auth):
     result = runner.invoke(app, ["upload", "does_not_exist.txt"])
-    assert result.exit_code == 0 # Caught by the inner loop
-    assert "File not found" in result.stdout
-    assert "Failed: 1" in result.stdout
+    assert result.exit_code == 1 # Now raises Exit(1) because path doesn't exist up front
+    assert "Error: Path 'does_not_exist.txt' does not exist" in result.stdout
